@@ -61,8 +61,11 @@ node -e "require('node:sqlite'); console.log('node:sqlite OK', process.version)"
 
 装法二选一（别两条都走，会留下互相不知情的副本）：
 
-**A-1 走 IDE 的本地安装入口（推荐）**：在插件管理里选"从本地安装"，指向本仓库目录。IDE 会把
-内容复制进版本化缓存，并写一条注册表记录：
+**A-1 走 IDE 的本地安装入口（推荐）**：先从
+[Releases](https://github.com/CyrilPeng/qoder-account-manager/releases) 下载
+`qoder-account-manager-v<版本>.zip`，解压后在插件管理里选"从本地安装"，指向解压出来的
+`qoder-account-manager/` 目录。发布包按版本号命名，不含 git 历史，也不含任何账号数据。
+IDE 会把内容复制进版本化缓存，并写一条注册表记录：
 
 ```text
 ~/.qoder-cn/plugins/cache/local/qoder-account-manager/0.2.0/
@@ -70,8 +73,11 @@ installed_plugins_v2.json → "qoder-account-manager@local": { scope, installPat
 ```
 
 `version` 从 `.qoder-plugin/plugin.json` 读取，**只有重装时才会刷新**，改代码不会动它。
-⚠ 从 git 工作目录安装会连 `.git` 一起复制（约 150KB）；介意就先导出一份干净副本再装：
-`git archive --format=zip -o ../qam.zip HEAD`。
+
+> ⚠ 直接指向 `git clone` 出来的工作目录也能装上，但 IDE **不会剥离 `.git`**，会把整份 git
+> 历史复制进缓存目录。从源码自己出一份干净副本：
+> `git archive --format=zip -o ../qam.zip HEAD`
+> 按 tag 发版的完整流程见[发版流程](#发版流程)。
 
 **A-2 手工放置**：把插件目录（含 `.qoder-plugin/`）复制进 IDE 的插件目录，落地目录名与清单
 `name` 一致：
@@ -326,11 +332,11 @@ rm -rf ~/.qoder-account-manager
   `server.json` 里的 token 一旦被别人拿到，对方就能以你的身份使用 Qoder。它们只在
   Windows 当前用户的 ACL 下（`server.json` 尽量按 0600 创建，Windows 实际继承目录权限）。
   **别把 `~/.qoder-account-manager/` 放进网盘/同步目录/备份到第三方，也别截图其中的文件。**
-  输出侧只给脱敏字段：uid 掩码、邮箱与手机掩码。
-  ⚠ 一个例外要知道：**昵称是原样显示的**，而用邮箱注册的账号，客户端把邮箱写进了
-  `user.name`——所以页面、CLI 甚至 `switch.log` 里会出现完整邮箱，那是账号自己的显示名，
-  不是解密出来的额外信息。截图或分享日志前把它一起当 PII 处理（`--name` 用昵称备注可以
-  改善可读性，但不会替换掉客户端给的 name）。
+  输出侧的脱敏只针对**从凭证里解出来的字段**：uid 掩码、邮箱与手机掩码。
+  **昵称按客户端原文显示**，不额外脱敏——Qoder 自己的界面也一直是原文显示昵称，本工具不做得
+  比它更保守。用邮箱注册的账号，客户端会把邮箱写进 `user.name`，因此页面、CLI 乃至
+  `switch.log` 里出现完整邮箱属于预期行为（那是账号自己的显示名，不是解出来的额外信息）。
+  `--name` 存的备注名只影响列表可读性，不会替换客户端给的 `name`。
 - **token 全程不输出**：不打印到终端、不写进 `switch.log` / `signin-log.json`、不在任何
   HTTP 响应体里。CLI 的 `--json` 也只含掩码。若你哪天在任何输出里看到明文 token，那是 bug，
   请当安全事故报上来。
@@ -565,6 +571,31 @@ QODER_AM_HOME=D:\qoder-accounts node --no-warnings scripts/console.mjs
   `.qoder-plugin/` 建议重启 IDE 重新扫描。数据都在 `~/.qoder-account-manager`，同步代码不影响槽位。
 - 发版前用 create-plugin 的离线校验器复核清单与目录结构（`validate_qoder_plugin.py <插件目录>`），
   再确认 `CHANGELOG.md` 的「未发布」已改写成版本段、`.qoder-plugin/plugin.json` 的 `version` 同步。
+
+#### 发版流程
+
+版本号只有三处必须对齐：`.qoder-plugin/plugin.json` 的 `version`、`CHANGELOG.md` 的版本段标题、
+git tag。打完 tag 再出发布包，别人下载 zip 就是干净源码（无 `.git`、无账号数据），按版本号区分：
+
+```bash
+# 1) 「未发布」改写成 ## vX.Y.Z，plugin.json 的 version 同步，然后提交
+git commit -am "chore(release): 发布 vX.Y.Z"
+git tag -a "vX.Y.Z" -m "vX.Y.Z"
+
+# 2) 从 tag 出发布包（--prefix 让解压后是一层带名字的目录，可直接指给 IDE 本地安装）
+git archive --format=zip --prefix=qoder-account-manager/ \
+  -o "../qoder-account-manager-vX.Y.Z.zip" "vX.Y.Z"
+
+# 3) 推代码与 tag，建 Release 并挂包
+git push origin main "vX.Y.Z"
+gh release create "vX.Y.Z" "../qoder-account-manager-vX.Y.Z.zip" --title "vX.Y.Z" \
+  --notes-file <把该版本段单独存成的 md>
+```
+
+> GitHub 自动生成的 `Source code (zip/tar.gz)` 同样不含 `.git`，随手用它安装也行；挂上去的那份
+> zip 只是把目录名固定成 `qoder-account-manager/`，解压层级更可预期。
+> tag 只指向"清单版本 = tag 版本"的那个 commit，改代码未升 `version` 时不要打 tag——
+> 注册表里的 `version` 只在重装时刷新，两套号一错位就很难对齐。
 
 ### 许可
 
