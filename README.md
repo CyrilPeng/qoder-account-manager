@@ -12,16 +12,14 @@ Qoder CN IDE 的本地多账号管理工具：**图形控制台**、**快照式�
 **目录**：[功能](#功能) · [环境与安装](#环境与安装) · [快速上手](#快速上手) ·
 [命令参考](#命令参考) · [客户端布局](#支持的客户端布局) · [控制台](#控制台ui) ·
 [安全与隐私](#安全与隐私) · [原理](#原理) · [目录与数据](#目录与数据) ·
-[故障排查](#故障排查) · [已知边界](#已知边界) · [卸载与数据清理](#卸载与数据清理) ·
-[变更日志](#变更日志)
+[故障排查](#故障排查) · [已知边界](#已知边界) · [卸载与数据清理](#卸载与数据清理)
+
+版本变更请看 [CHANGELOG.md](CHANGELOG.md)（本文件只讲用法与原理，不再重复变更历史）。
 
 ## 功能
 
-> **怎么调用（重要）**：在聊天框输入 `/` 选择下面的 **skill 名**。实测 Qoder CN 0.4.3
-> 的斜杠菜单**只暴露插件的 skills，不暴露 `commands/` 目录里的命令**——`commands/`
-> 保留给支持它的构建，但别指望在那份清单里找到它。所以「打开控制台」请敲
-> `/account-console`（不是 `/account-ui`，那个名字不存在）。插件也无法在 IDE 里加按钮
-> 或菜单（清单没有 `views`/`menus` 贡献点）。
+> **入口**：聊天框输入 `/` 选择 skill，`/account-console` 唤出图形控制台（浏览器页面）。
+> 本构建的斜杠菜单只列 skills，不列 `commands/`。
 
 | Skill | 说明 |
 | --- | --- |
@@ -33,10 +31,8 @@ Qoder CN IDE 的本地多账号管理工具：**图形控制台**、**快照式�
 | —（CLI）`accounts.mjs sessions` | **会话可见性诊断**：本地会话/工作区计数，切换前后对比用（控制台内也有面板） |
 | —（CLI）`accounts.mjs rollback <id> --yes` | 把槽位与它的上一代 `.bak` **互换**（覆盖保存后找回旧快照；再跑一次即换回） |
 
-插件清单不支持 IDE 内原生按钮/面板（无 `views`/`menus` 贡献点），所以图形界面走
-「本地 HTTP 服务 + 浏览器页面」形态。**每个界面动作都有等价的命令行入口**，不装插件、
-不开 IDE 也能用全套功能（只有快照档位与自退阈值的开关是「改 `config.json`」这一条捷径，
-两种方式都写在下文）。
+图形界面走「本地 HTTP 服务 + 浏览器页面」形态（插件无法在 IDE 内加按钮或菜单）。
+**每个界面动作都有等价的命令行入口**，不装插件、不开 IDE 也能用全套功能。
 
 ## 环境与安装
 
@@ -44,10 +40,10 @@ Qoder CN IDE 的本地多账号管理工具：**图形控制台**、**快照式�
 
 | 项 | 要求 | 说明 |
 | --- | --- | --- |
-| 操作系统 | **Windows 10/11** | 解密链走 DPAPI（`CryptUnprotectData`），exe 探测/进程控制用 `tasklist`/`taskkill`。macOS/Linux 未实现，keychain 与 safeStorage 后端不同，改不了几行就能跑。 |
-| Qoder CN IDE | 已安装，且**至少成功登录过一次** | 需要客户端自己写出第一份登录态；实测适配 0.4.3（electron-root 布局），旧版 icube 布局见[支持的客户端布局](#支持的客户端布局)。 |
-| Node.js | **≥ 22.13**（或 ≥ 23.4） | 需要内置 `node:sqlite`，它从 `v23.4.0 / v22.13.0` 起免 `--experimental-sqlite`。验证于 v22.23.2 / v24.19.0。**硬依赖**：`qoder_lib.mjs` 与 `status.mjs` 都是顶层 `import`，任何子命令都会加载它，所以版本不够是整个工具起不来，不是只有 `sessions` 不能用。 |
-| PowerShell | 系统自带即可 | DPAPI 解密助手 `scripts/dpapi_unprotect.ps1` 经 stdin/stdout 传 base64，不经临时文件。 |
+| 操作系统 | **Windows 10/11** | 解密走 DPAPI，进程控制用 `tasklist`/`taskkill`；不支持 macOS/Linux。 |
+| Qoder CN IDE | 已安装，且**至少成功登录过一次** | 实测适配 0.4.3（electron-root 布局）；旧版 icube 布局见[支持的客户端布局](#支持的客户端布局)。 |
+| Node.js | **≥ 22.13**（或 ≥ 23.4） | 需要内置 `node:sqlite`，这两个版本起免 `--experimental-sqlite`。验证于 v22.23.2 / v24.19.0；`node:sqlite` 是顶层依赖，版本不够整套命令都起不来。 |
+| PowerShell | 系统自带 | DPAPI 解密助手 `scripts/dpapi_unprotect.ps1`，经 stdin/stdout 传 base64，不落临时文件。 |
 
 装之前先确认环境：
 
@@ -57,61 +53,45 @@ node -e "require('node:sqlite'); console.log('node:sqlite OK', process.version)"
 
 ### 安装方式 A：作为 Qoder 插件（推荐，能用 `/account-console` 等斜杠入口）
 
-有两条路，**行为不一样**，选一条就行（别两条都走，会留下互相不知情的副本）：
+装法二选一（别两条都走，会留下互相不知情的副本）：
 
-**A-1 走 IDE 的本地安装入口（推荐）**：在插件管理里选"从本地安装"，指到本仓库目录。
-IDE 会把内容**复制**进版本化缓存，并把这条记录写进注册表：
+**A-1 走 IDE 的本地安装入口（推荐）**：在插件管理里选"从本地安装"，指向本仓库目录。IDE 会把
+内容复制进版本化缓存，并写一条注册表记录：
 
 ```text
 ~/.qoder-cn/plugins/cache/local/qoder-account-manager/0.2.0/
-installed_plugins_v2.json → "qoder-account-manager@local":
-  { scope, installPath: …​/cache/local/qoder-account-manager/0.2.0, version, installedAt, appRowId, displayName }
+installed_plugins_v2.json → "qoder-account-manager@local": { scope, installPath, version, installedAt, … }
 ```
 
-`version` 是从 `.qoder-plugin/plugin.json` 读出来的，所以**重装一次就会把注册表里的版本号对齐**
-（实测：手工放置时的条目停在 0.1.0，走 A-1 重装后变成 0.2.0）。
-⚠ 从 git 工作目录安装会**连 `.git` 一起复制**（约 150KB），介意的话先导出一份干净副本再装：
-`git archive --format=zip -o ../qam.zip HEAD` 或直接用仓库的 zip 下载。
+`version` 从 `.qoder-plugin/plugin.json` 读取，**只有重装时才会刷新**，改代码不会动它。
+⚠ 从 git 工作目录安装会连 `.git` 一起复制（约 150KB）；介意就先导出一份干净副本再装：
+`git archive --format=zip -o ../qam.zip HEAD`。
 
-**A-2 手工放置**：把整个插件目录（含 `.qoder-plugin/`）复制进 IDE 的插件目录，**落地目录名
-保持与清单 `name` 一致**：
+**A-2 手工放置**：把插件目录（含 `.qoder-plugin/`）复制进 IDE 的插件目录，落地目录名与清单
+`name` 一致：
 
 ```bash
-cp -r qoder-account-manager "$USERPROFILE/.qoder-cn/plugins/"    # 仓库名就叫 qoder-account-manager
-cp -r . "$USERPROFILE/.qoder-cn/plugins/qoder-account-manager"    # 仓库根就是插件根
-Copy-Item -Recurse .\qoder-account-manager "$env:USERPROFILE\.qoder-cn\plugins\"   # PowerShell
+cp -r qoder-account-manager "$USERPROFILE/.qoder-cn/plugins/"
 ```
 
-这种方式在实测中也确实能被加载（v0.1.0 就是这么装上的），注册表会把 `installPath` 直接指向
-`plugins/qoder-account-manager`。但要注意：**之后如果又走 A-1 重装，注册表就改指缓存目录，
-手工那份立刻变成没人引用的孤儿副本**——表现为"改了代码不生效"（IDE 跑的是 cache 那份）。
-删掉孤儿即可，别试图让它"两边同步"。
+之后若改走 A-1 重装，注册表会改指缓存目录，手工那份立刻成为没人引用的孤儿副本——"改了代码
+不生效"多半是这个原因，删掉孤儿即可。
 
-不管走哪条，装完都重启 Qoder 让斜杠菜单重新扫描（部分构建新会话就能发现；`/account` 看不到
-就先重启）。应当列出 `account-console` / `account-switch` / `account-status` / `daily-signin`
-四项。然后**先确认当前生效的是哪一份**，再在那份里自检：
+装完重启 Qoder 让斜杠菜单重新扫描，应能看到 `account-console` / `account-switch` /
+`account-status` / `daily-signin` 四项。接着确认当前生效的是哪一份，在那一份里自检：
 
 ```bash
-# 打印注册表里的生效路径
-node -e 'const j=JSON.parse(require("fs").readFileSync(process.env.USERPROFILE+"/.qoder-cn/plugins/installed_plugins_v2.json","utf8"));console.log(j.plugins["qoder-account-manager@local"][0])'
 cd "$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.USERPROFILE+"/.qoder-cn/plugins/installed_plugins_v2.json","utf8")).plugins["qoder-account-manager@local"][0].installPath)')"
 node --no-warnings scripts/accounts.mjs doctor
 ```
 
-`doctor` 打印出「生效数据目录 + 布局 v2 + exe 路径」就说明能开始了。
-
-> **注册表实测笔记**（2026-10-09）：手工放置那条记录长这样
-> `{enabled, installPath, installedAt, lastUpdated, scope, source:"local", version}`；
-> 走 A-1 的本地安装入口之后变成
-> `{scope, installPath, version, installedAt, appRowId, displayName}`——`source`/`enabled`/
-> `lastUpdated` 不在了，多了 `appRowId`。也就是说**这条记录完全由安装流程重写，不要手工维护**：
-> `version` 只有在重装时才会跟着清单走（这正是"版本号对齐"的唯一时机），而**改代码不需要重装**
-> （加载按 `installPath`）。别把这份文件当同步点，也别在它上面加你的改动。
+`doctor` 打印出生效数据目录、布局 v2 与 exe 路径就可以开始了。注册表由安装流程整体维护，
+**不要手工编辑它**。
 
 ### 安装方式 B：纯 CLI / 便携使用（不注册、不重启 IDE）
 
-脚本内部路径全部相对自身解析（`PLUGIN_ROOT = dirname(scripts/)`），运行数据目录则固定在
-`~/.qoder-account-manager`（可用 `QODER_AM_HOME` 改）。所以放哪儿都能跑，也不必是 git 仓库：
+代码路径全部相对自身解析，运行数据固定在 `~/.qoder-account-manager`（可用 `QODER_AM_HOME`
+改），所以放哪儿都能跑，也不必是 git 仓库：
 
 ```bash
 cd /d/tools/qoder-account-manager     # Git Bash 写法；cmd/PowerShell 里是 D:\tools\qoder-account-manager
@@ -261,10 +241,9 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
 **数据目录不写死**：优先解析运行中进程的 `--user-data-dir` 命令行参数，回退候选目录
 探测，可用 `QODER_DATA_DIR` 环境变量或 `config.json` 覆盖。
 
-> v0.1.0 曾把目录硬编码为 `%APPDATA%\QoderCN`。客户端升级到 0.4.3 后数据目录迁到了
-> `com.qodercn.app.stable`，插件于是读到一个停用目录，报出来的"当前登录"全是升级前的
-> 过期身份（且签到打到了旧账号上）。v0.2.0 起改为动态解析，并提供 `doctor` 自检。
-> 旧布局保存的槽位会被标记为「布局不兼容」，切换前预检拦下，不会白关一次 IDE。
+> 客户端升级会换数据目录（0.4.2 及更早在 `%APPDATA%\QoderCN`，0.4.3 起在
+> `com.qodercn.app.stable`）。旧布局保存的槽位会被标记「布局不兼容」，切换前预检拦下、
+> 不会白关一次 IDE；在新客户端登录该账号后重新 `save` 即可恢复可用。
 
 ## 控制台（UI）
 
@@ -282,23 +261,19 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
   明说"服务已退出，重开 Qoder 再跑 `/account-console`"，不会让人以为是坏了。
   **切换进行中豁免**：`switch.lock` 有效或切换子进程还活着时计时器清零，绝不半路跑路。
   探测失败（tasklist 报错）按"IDE 还在"处理——宁可少杀不可误杀。
-- 历史上这里曾写过"进程在 Qoder 的 Job Object 内，可能被连带回收"，那是**推断而非结论**：
-  2026-10-09 一次真实切换（`taskkill` 杀掉 13 个 IDE 进程并重启）之后同一个服务进程仍在
-  监听、`/api/ping` 正常、**一次性 token 也没变**（token 绑进程，进程不换 token 就不换，
-  所以"用之前的 token 还能打开 webui"是正常现象）。现在的口径是：不承诺它在，也不承诺它
-  一定死，真正的保证是数据全在 `~/.qoder-account-manager/`、跟服务无关。实测覆盖的只有
-  `taskkill` 这一条路径，IDE 正常退出/崩溃/关机都没验过。
+- **别把服务当契约**：它是否随 Qoder 一起退出取决于 IDE 的 Job Object，不做承诺；真正可靠的
+  是数据全在 `~/.qoder-account-manager/`，与服务无关。token 绑定进程，所以服务没换进程时
+  老地址老 token 依旧能用；`--restart` 或重启机器才会变。
 - **切换的进程存活问题已被设计消解**：`/api/switch` 以 detached 子进程跑 `switch.mjs`
-  并把输出写入 `switch.log` 供前端轮询；同时 `taskkill` **去掉了 `/T`**（`/T` 会连
-  子进程树一起杀，而 `node.exe` 正是 Qoder 的后代，等于自杀）。即便如此，切换进程仍
+  并把输出写入 `switch.log` 供前端轮询；同时 `taskkill` **不带 `/T`**（带 `/T` 会连子进程树
+  一起杀，而 `node.exe` 正是 Qoder 的后代，会杀掉切换自己）。即便如此，切换进程仍
   可能因 job 回收而在 Qoder 退出时中断——所以恢复流程把 `auth.v1.dat` 放在**第一步**
   且用同卷 `rename` 原子落地。因为各槽位的 `Local State` 字节完全相同（同一把
   os_crypt 钥），换账号实质等价于换这一个文件，故任何中断点都只会得到"已切换成功"
   或"尚未切换"两种完整状态，**不存在半交换的损坏**。
 - 切换按钮为**勾选式二次确认**，且当前账号/不兼容槽位/解不开的快照自动置灰。确认块做成
   一整块橙色描边高亮 + 24px 复选框（点文字也能勾），**未勾选时主按钮是锁定的**、文案带
-  「（先勾选）」，勾上后整块转绿、按钮亮起、提示行变成「✓ 已确认」。之前那是一个 13px
-  深色底深色边的小方框，暗色主题下几乎看不见——看不清的二次确认等于没有二次确认。
+  「（先勾选）」，勾上后整块转绿、按钮亮起、提示行变成「✓ 已确认」。
 - **会话可见性面板**：基线存在 `sessionStorage`，切换后页面被重新加载也仍能对比；
   切换完成（或失败/超时）时前端会自动重测一次并给出「与切换前一致 / ±N 条变化」的标记；
   也可以手动点「记为切换前基线」。
@@ -356,8 +331,7 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
   - 写入顺序：预检（当前目录必需文件齐全）→ 旧快照连同 meta 一起挪成 `.bak` → 逐项容错拷贝
     → 校验「必需文件在 + 真能解密出登录态」→ 写令牌缓存 → 写 meta。
   - **校验不通过就还原**：删掉半成品槽位，把 `.bak` 连同 `.meta.json.bak` 一起换回主槽位，
-    绝不会出现「重新保存失败 → 原槽位从列表里消失」的情况（此处曾有判据写反的缺陷：
-    条件误写成 `!hadSlot && hadBak`，只有主槽位本来不存在时才还原，正好把要保的那一代漏掉）。
+    不会出现「重新保存失败 → 原槽位从列表里消失」；新增槽位失败则整体清干净，不留半成品。
   - `.bak` 是**可操作的**回退点，不只是个提示：控制台槽位卡片有「回退到上一代」按钮，
     CLI 是 `accounts.mjs rollback <id> --yes`，互换对称，再执行一次就换回来。
   - `save` 成功后同步刷新 `creds/<id>.json`：令牌缓存只是副本，快照才是真源；不刷新就会
@@ -365,13 +339,10 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
 - **切换有回读验证**：恢复完不会只看"拷了几个文件"，而是把实时目录的登录态重新解一遍，
   确认 uid 与目标一致才继续重启；不一致直接报 `identity-mismatch` 并停止，不给你一个
   「以为切过去了其实没切」的 IDE。验证通过后顺带把实时凭证写回该槽位的缓存。
-- **对话保留（已端到端实测，非推测）**
-  - **端到端结论**：2026-10-09 08:06 从 `acct2` 切到 `acct1`（两个槽位都是本人账号，
-    真实邮箱/昵称不在公开文档里出现），`switch.log` 显示「回读验证 ✓ 实时目录登录态与
-    目标 uid 一致」，
-    切换前后 `main.sqlite` 的会话一条没少（15 条 / 307 条消息，均在切换前就已存在），
-    重启后 IDE 自己的会话列表里**切换前创建的对话仍然在列**，连这条正在进行的会话都跨过了
-    一次 IDE 重启继续跑。也就是说：切号之后能接着聊，不是推测而是观察到的结果。
+- **对话保留（已端到端实测）**
+  - **实测结论**：2026-10-09 08:06 从 `acct2` 切到 `acct1`，`switch.log` 记录「回读验证 ✓
+    实时目录登录态与目标 uid 一致」；切换前后 `main.sqlite` 会话一条没少（15 条 / 307 条消息），
+    重启后 IDE 的会话列表里切换前创建的对话仍在列，正在进行的会话也跨过了这次 IDE 重启。
   - 聊天记录在 `main.sqlite`（51MB+）与 `chat-session-*.sqlite`，属**禁交换硬红线**
     （29 条，`snapshotWhitelist` 与 `restoreSnapshot` 双重过滤，任何配置都绕不过）。
   - 更关键的是 `Local Storage/leveldb` 里存着 `workspaceSessions` / `workspaceLayout` /
@@ -414,6 +385,7 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
 
 ```text
 qoder-account-manager/
+  CHANGELOG.md                     # 版本变更（按 未发布/vX.Y.Z 分组，不在 README 里重复）
   .qoder-plugin/plugin.json      # 插件清单
   assets/avatar.svg              # 本地生成的 logo
   assets/console.html            # 控制台前端（单文件、零外部依赖、离线可用）
@@ -434,8 +406,6 @@ qoder-account-manager/
   scripts/console.mjs            # 控制台启动器（detached）
   scripts/dpapi_unprotect.ps1    # DPAPI 解密助手（stdin/stdout base64）
 ```
-
-运行数据（不在插件目录内，卸载插件不丢账号）：
 
 插件本体在 IDE 的插件目录下（约 280K，全是可重下的代码；走 IDE 本地安装入口时具体位置是
 `~/.qoder-cn/plugins/cache/local/qoder-account-manager/<version>/`，手工放置时是
@@ -481,7 +451,7 @@ QODER_AM_HOME=D:\qoder-accounts node --no-warnings scripts/console.mjs
 | --- | --- |
 | 打开页面显示 403 | 地址没带 `?t=<token>`。重新跑 `console.mjs` 拿完整地址；token 绑进程，`--restart` 后会变。 |
 | 页面突然点不动 / 连接被拒 | 大概率是服务按设计自退了（Qoder 连续 180s 不在运行）。看 `config.exitAfterNoQoderSec`，想常驻设 `0`。重开 Qoder 再 `/account-console`，槽位数据不受影响。 |
-| 显示的「当前登录」不是我正在用的账号 | 先 `accounts.mjs doctor`，核对「生效数据目录」与「布局」。客户端升级换目录时会读到一个停用目录（v0.1.0 的老 bug）。 |
+| 显示的「当前登录」不是我正在用的账号 | 先 `accounts.mjs doctor`，核对「生效数据目录」与「布局」。客户端升级换数据目录时，插件可能读到一个已停用的旧目录。 |
 | 切完身份没变，像没生效 | ① 看 `switch.log` 是否报 `identity-mismatch`；② 平时用自定义 `--user-data-dir` 启动的，必须把该目录写进 `config.dataDir` 且把参数写进 `config.launchArgs`，否则切换写 A 目录、重启读 B 目录。 |
 | 点保存/签到/删除返回 409 | `switch.lock` 有效，说明有一次切换正在跑，这是保护不是坏了；页面写按钮同步置灰。 |
 | 明明没在切换却一直报锁 | 上一个切换进程被 IDE 的 Job Object 连带回收时来不及清锁。超过 15 分钟会被识别为陈旧锁自动放行；CLI 急着用可加 `--force`（日志会写明顶掉了谁）。 |
@@ -513,21 +483,18 @@ QODER_AM_HOME=D:\qoder-accounts node --no-warnings scripts/console.mjs
   `QAM_PORT`/`QAM_TOKEN` 可固定端口与 token，便于脚本化测试。
 - **自测入口**：`accounts.mjs status --json` 的 `QAM_JSON:` 一行就是控制台 `/api/status`
   的同一份数据（两者共用 `status.mjs` 的 `collectStatus()`），页面显示异常时先用 CLI 对照。
-- **两份副本要手动同步**：现在通常同时存在**三处**——「仓库目录」（git 追踪的那份）、
-  「IDE 实际加载的那份」（路径见注册表的 `installPath`，走本地安装入口时是
-  `plugins/cache/local/qoder-account-manager/<version>/`）、以及可能残留的「手工放置副本」
-  （`plugins/qoder-account-manager/`）。只有第二处决定 `/account-console` 跑的是什么代码。
-  同步命令（从仓库出发，目标路径现取，别写死）：
+- **变更记进 CHANGELOG.md**：影响用户行为的改动先写进「未发布」，发版时改写成版本段并同步
+  清单 `version`；分组与写法见 `CHANGELOG.md` 开头。
+- **代码改动要同步到生效副本**：仓库、IDE 加载的那份（注册表 `installPath`）、以及可能残留的
+  手工放置副本，只有第二处决定实际跑的是什么。从仓库同步过去，目标路径现取：
   ```bash
   TARGET=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.USERPROFILE+"/.qoder-cn/plugins/installed_plugins_v2.json","utf8")).plugins["qoder-account-manager@local"][0].installPath)')
-  cp -r .qoder-plugin assets commands scripts skills README.md "$TARGET/" && diff -r . "$TARGET" --exclude=.git
+  cp -r .qoder-plugin assets commands scripts skills README.md CHANGELOG.md "$TARGET/" && diff -r . "$TARGET" --exclude=.git
   ```
-  改完 `scripts/*.mjs` 要 `console.mjs --restart` 才生效（服务进程内存里还是旧代码），
-  改 `skills/`、`commands/`、`.qoder-plugin/` 建议重启 IDE 重新扫描。两边数据都在
-  `~/.qoder-account-manager`，所以同步代码不影响槽位。
-- 校验：开发期已通过 create-plugin 的官方离线校验器（`validate_qoder_plugin.py`）校验过清单
-  与目录结构。本轮改版只动了 `accounts.mjs` 与文档，未复跑该校验器（当前机器上已找不到那个
-  脚本）——分发前若你能拿到它，建议再跑一次。
+  改完 `scripts/*.mjs` 要 `console.mjs --restart` 才生效，改 `skills/`、`commands/`、
+  `.qoder-plugin/` 建议重启 IDE 重新扫描。数据都在 `~/.qoder-account-manager`，同步代码不影响槽位。
+- 发版前用 create-plugin 的离线校验器复核清单与目录结构（`validate_qoder_plugin.py <插件目录>`），
+  再确认 `CHANGELOG.md` 的「未发布」已改写成版本段、`.qoder-plugin/plugin.json` 的 `version` 同步。
 
 ## 已知边界
 
@@ -587,38 +554,4 @@ rm -rf ~/.qoder-account-manager
 - IDE 的插件管理界面可能还缓存着旧条目，那是注册表（`installed_plugins_v2.json`）的显示
   状态，不影响功能；重启 IDE 后会一致。这一点没做过专门验证，仅作提示。
 
-## 变更日志
-
-### 0.2.0
-
-- **数据目录改为动态解析**（进程 `--user-data-dir` → 候选目录探测 → `config`/环境变量覆盖），
-  修掉升级后读到停用目录、报过期身份并把签到打到旧账号的问题；新增 `accounts.mjs doctor` 自检。
-- **快照分档重命名并改默认值**：`session`→`browser`（**默认关**）、`extra`→`appdata`；
-  这样切号不会把渲染层会话视图状态换走，"切号后继续之前的对话"因此成立（已端到端实测）。
-- **对话保留做了数据层取证**：`accounts.mjs sessions` + 控制台会话面板（切换前后对比）。
-- **控制台**：勾选式二次确认重做成醒目块（未勾选时主按钮锁定）、切换进度全程轮询显示、
-  槽位卡片增加「回退到上一代」、切换进行中写按钮置灰、看门狗倒计时横幅。
-- **服务不再常驻**：Qoder 连续 `exitAfterNoQoderSec`（默认 180）秒不在运行就自退并清理
-  `server.json`，切换进行中豁免、探测失败按"还在"处理。
-- **正确性与容错**：切换互斥 `switch.lock`（pid 存活 + 15 分钟陈旧判据）、切换前解密预检、
-  切换后回读验证落地 uid、覆盖保存的 `.bak` 可用 `rollback` 双向互换、修掉保存失败时
-  还原判据写反的缺陷、端口占用重试去重（原先会打印两次横幅并起两套看门狗）。
-- **安全加固**：槽位 id 在**所有**入口强制校验（此前只有 `save` 校验，`remove` 拿到 `../`
-  等于删任意目录）、Host 头白名单挡 DNS rebinding、请求体严格 UTF-8（防 GBK 静默写坏中文
-  备注名）、令牌缓存与快照取新者、`taskkill` 去掉 `/T`（`/T` 会杀掉自己的切换子进程树）。
-- **文档**：把"推断"与"实测结论"分开写，逐条标注哪些路径还没验过；README 重写为可分发版本
-  （安装方式、完整命令参考、环境变量与 `config.json` 字段表、故障排查表、安全与隐私模型、
-  卸载与数据清理）。
-- **CLI 补 `rename <id> --name <n>`**：此前只有控制台能改备注名，命令行只能手改注册表。
-- **实测并记录 IDE 的本地安装行为**：走安装入口时插件被**复制**进
-  `plugins/cache/local/<name>/<version>/`，注册表条目由安装流程整体重写
-  （`version` 只有这时候才跟着清单走），且从 git 工作目录安装会连 `.git` 一起复制；
-  手工放置的那条记录 schema 不同（带 `enabled`/`source`/`lastUpdated`）。
-
-数据兼容：0.1.0 保存的 v1 布局槽位在 0.2.0 下会被识别并标记「布局不兼容」，切换前拦下，
-需要在新客户端重新登录并 `save`；`config.json` 里的旧档位名会自动迁移（旧值不沿用，
-因为新语义下默认值变了）。注册表 `version` 会在下一次保存时归一到 2。
-
-### 0.1.0
-
-首个版本：硬编码 `%APPDATA%\QoderCN` 的 icube 布局快照交换、CLI 槽位管理与每日签到。
+版本变更记录在 [CHANGELOG.md](CHANGELOG.md)，不在此重复。
