@@ -9,14 +9,20 @@ Qoder CN IDE 的本地多账号管理工具：**图形控制台**、**快照式�
 > ⚠️ 非官方插件，仅供个人学习研究。多账号操作可能违反 Qoder 服务条款，
 > 风险自担；请仅管理本人合法持有的账号。
 
-**目录**：[功能](#功能) · [环境与安装](#环境与安装) · [快速上手](#快速上手) ·
-[命令参考](#命令参考) · [客户端布局](#支持的客户端布局) · [控制台](#控制台ui) ·
-[安全与隐私](#安全与隐私) · [原理](#原理) · [目录与数据](#目录与数据) ·
-[故障排查](#故障排查) · [已知边界](#已知边界) · [卸载与数据清理](#卸载与数据清理)
+**第一部分 · 上手使用** — [功能](#功能) · [环境与安装](#环境与安装) · [快速上手](#快速上手) ·
+[控制台](#控制台ui) · [命令参考](#命令参考) · [故障排查](#故障排查) ·
+[卸载与数据清理](#卸载与数据清理)
 
-版本变更请看 [CHANGELOG.md](CHANGELOG.md)（本文件只讲用法与原理，不再重复变更历史）。
+**第二部分 · 数据与边界** — [安全与隐私](#安全与隐私) · [支持的客户端布局](#支持的客户端布局) ·
+[目录与数据](#目录与数据) · [已知边界](#已知边界)
 
-## 功能
+**第三部分 · 开发者参考** — [原理](#原理) · [开发与自测](#开发与自测) · [许可](#许可)
+
+版本变更请看 [CHANGELOG.md](CHANGELOG.md)。
+
+## 第一部分 · 上手使用
+
+### 功能
 
 > **入口**：聊天框输入 `/` 选择 skill，`/account-console` 唤出图形控制台（浏览器页面）。
 > 本构建的斜杠菜单只列 skills，不列 `commands/`。
@@ -34,9 +40,9 @@ Qoder CN IDE 的本地多账号管理工具：**图形控制台**、**快照式�
 图形界面走「本地 HTTP 服务 + 浏览器页面」形态（插件无法在 IDE 内加按钮或菜单）。
 **每个界面动作都有等价的命令行入口**，不装插件、不开 IDE 也能用全套功能。
 
-## 环境与安装
+### 环境与安装
 
-### 要求
+#### 要求
 
 | 项 | 要求 | 说明 |
 | --- | --- | --- |
@@ -51,7 +57,7 @@ Qoder CN IDE 的本地多账号管理工具：**图形控制台**、**快照式�
 node -e "require('node:sqlite'); console.log('node:sqlite OK', process.version)"
 ```
 
-### 安装方式 A：作为 Qoder 插件（推荐，能用 `/account-console` 等斜杠入口）
+#### 安装方式 A：作为 Qoder 插件（推荐，能用 `/account-console` 等斜杠入口）
 
 装法二选一（别两条都走，会留下互相不知情的副本）：
 
@@ -88,7 +94,7 @@ node --no-warnings scripts/accounts.mjs doctor
 `doctor` 打印出生效数据目录、布局 v2 与 exe 路径就可以开始了。注册表由安装流程整体维护，
 **不要手工编辑它**。
 
-### 安装方式 B：纯 CLI / 便携使用（不注册、不重启 IDE）
+#### 安装方式 B：纯 CLI / 便携使用（不注册、不重启 IDE）
 
 代码路径全部相对自身解析，运行数据固定在 `~/.qoder-account-manager`（可用 `QODER_AM_HOME`
 改），所以放哪儿都能跑，也不必是 git 仓库：
@@ -106,7 +112,7 @@ node --no-warnings scripts/accounts.mjs list
 > `~/.qoder-account-manager`，与仓库位置无关，所以 clone、打包、分享这个仓库**不会带走
 > 任何账号凭证**；反过来，也不要把那个数据目录放进仓库或同步盘。
 
-## 快速上手
+### 快速上手
 
 1. `/account-console` 打开控制台（或 `node --no-warnings scripts/console.mjs`）。
 2. 在 Qoder 登录账号 A，控制台点「保存当前账号为新槽位」（或
@@ -122,130 +128,7 @@ node --no-warnings scripts/accounts.mjs list
 6. 覆盖保存点错了、想把槽位内容换回上一代：槽位卡片上的「回退到上一代」（或
    `accounts.mjs rollback <id> --yes`），互换是对称的，再执行一次就换回来。
 
-## 命令参考
-
-`<插件根>` = 本 README 所在目录。所有命令都写成 `node --no-warnings <插件根>/scripts/xxx.mjs`
-（`--no-warnings` 是为了压掉 `node:sqlite` 的实验特性警告，不是必需）。带 `--json` 的命令会在
-stdout 末尾多输出一行 `QAM_JSON:{...}`，控制台服务就是靠它解析的，脚本化时按前缀取即可。
-
-### `accounts.mjs` — 槽位管理
-
-| 命令 | 作用 |
-| --- | --- |
-| `list [--json]` | 槽位简表 + 当前登录 + Qoder 进程状态 |
-| `status [--json]` | 详细状态：凭证缓存、签到记录、快照策略、锁、上一代备份 |
-| `save <id> [--name <n>] [--kill] [--json]` | 把当前登录态存进槽位 `<id>`（已存在则覆盖，旧代留成 `.bak`）。`--kill` 先关闭 Qoder 以尽量拷全（默认档位不需要）。 |
-| `rollback <id> --yes [--json]` | 槽位与上一代 `.bak` **互换**，可再执行一次换回 |
-| `remove <id> --yes [--json]` | 删除槽位（连带 `.bak`、`meta.bak`、凭证缓存） |
-| `rename <id> --name <n> [--json]` | 只改注册表里的备注名（不碰快照与凭证；80 字上限，`--name` 值不能以 `-` 开头） |
-| `doctor [--json]` | 环境自检：生效数据目录、布局、exe 解析结果、布局不兼容的槽位 |
-| `sessions [--json]` | 会话可见性诊断（只读计数与元信息，不读对话正文） |
-
-切换动作在 `switch.mjs`（见下）；`rename` 与控制台的 `/api/rename` 等价。
-
-槽位 id 规则：**字母/数字/`_`/`-`，1~64 字符**（id 会拼进快照目录名，非法 id 在入口直接拒绝，
-`../x`、`a/b`、超长一律报错/400）。`--name` 的值不能以 `-` 开头（会被当成开关）。
-
-### `switch.mjs` — 账号切换
-
-```bash
-node --no-warnings scripts/switch.mjs switch <目标id> [--save-as <id>] [--no-save-current]
-                                                  [--no-restart] [--no-kill] [--force] [--json]
-```
-
-流程：预检（目标槽位存在 + 布局兼容 + **能解密出登录态**）→ 探测当前登录 → 关闭 Qoder →
-备份当前登录态到自己槽位 → 恢复目标快照 → **回读验证落地 uid** → 重启 Qoder。
-
-| 参数 | 作用 |
-| --- | --- |
-| `--save-as <id>` | 当前登录态存到指定槽位（默认按注册表里的当前账号） |
-| `--no-save-current` | 不备份当前登录态（**会丢当前账号的最新凭证**，谨慎） |
-| `--no-restart` | 切完不自动拉起 Qoder |
-| `--no-kill` | Qoder 正在运行就直接中止（避免边写边读损坏数据目录） |
-| `--force` | 顶掉别人的 `switch.lock`（只在确认上一个切换进程已卡死时用） |
-
-> ⚠ 切换会**关闭并重启 Qoder IDE**。如果 agent 正运行在这个 IDE 里，执行它就等于自断会话，
-> 所以请由用户在控制台点击确认，或在清楚后果的前提下手动跑 CLI。
-
-### `signin.mjs` — 每日签到
-
-```bash
-node --no-warnings scripts/signin.mjs signin [id...] [--json]   # 不传 id = 全部已保存账号
-node --no-warnings scripts/signin.mjs history [n] [--json]      # 最近 n 条签到记录
-```
-
-签到**不需要切换账号**：当前账号用实时登录态，其余账号解密各自槽位（与令牌缓存比谁新）。
-活跃账号**只用不刷**（见[原理](#原理)里的轮换安全策略），非活跃账号过期时自动用
-refreshToken 续期并双写回缓存与快照。
-
-### `console.mjs` — 控制台启动器
-
-```bash
-node --no-warnings scripts/console.mjs            # 启动或复用服务，并打开浏览器
-node --no-warnings scripts/console.mjs --no-browser
-node --no-warnings scripts/console.mjs --restart  # 改过服务端代码后用这个
-node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确 pid 停止
-```
-
-### 环境变量
-
-| 变量 | 作用 | 默认 |
-| --- | --- | --- |
-| `QODER_AM_HOME` | 管理数据目录（槽位/注册表/缓存/日志/锁的根） | `~/.qoder-account-manager` |
-| `QODER_DATA_DIR` | 覆盖客户端数据目录的自动探测 | 自动（先读进程 `--user-data-dir`，再探候选目录） |
-| `QODER_EXE` | 指定 Qoder 可执行文件绝对路径 | 自动解析，顺序见下条说明 |
-| `QAM_PORT` | 控制台服务起始端口（占用时自动 +1，最多试 10 次） | `38117` |
-| `QAM_TOKEN` | 指定访问 token（不设则启动时随机生成一次性 token） | 随机 |
-| `QAM_QODER_PROC_NAME` | 进程名（自测/多实例用，一般别动） | `Qoder CN.exe` |
-
-> `QODER_AM_HOME` 必须对**每一次调用**生效（CLI 与控制台服务是两个进程）。只在某个终端里
-> 设一次，就会出现"两个数据目录并存、槽位看起来空了"的错觉。
-
-> **exe 解析顺序**：`QODER_EXE` → `config.exePath` → **运行中进程的镜像路径**（PowerShell 查）
-> → 安装根扫描（`%LOCALAPPDATA%\Programs`、`C:\Program Files`、`C:\Program Files (x86)` 下的
-> `Qoder CN`/`Qoder`/`qoder-cn`，外加从 `accounts.json` 里已记录过的 exePath **反推出的安装根**，
-> 所以支持 `.qoder-versions/<版本>/` 多版本布局并自动取最新版）→ 注册表里那条可能已过期的
-> exePath。**装在非常见位置不需要改代码**：设 `QODER_EXE` 或把路径写进 `config.exePath` 就行；
-> 只要成功解析过一次，之后靠反推的根目录也能找到。`accounts.mjs doctor` 会打印本次解析结果。
-
-### `config.json`（管理数据目录下）
-
-```json
-{
-  "dataDir": null,
-  "layout": null,
-  "tiers": { "core": true, "browser": false, "appdata": false },
-  "exePath": null,
-  "launchArgs": [],
-  "exitAfterNoQoderSec": 180
-}
-```
-
-| 字段 | 说明 |
-| --- | --- |
-| `dataDir` / `exePath` | 手动覆盖自动探测结果（`null` = 自动）。平时用自定义 `--user-data-dir` 启动的人要填这里。 |
-| `layout` | 保留字段，布局一律按目录内容实测，写了也不生效。 |
-| `tiers` | 快照档位。`core` 不可关；`browser` **默认关**（开着会把会话视图状态一起换走，表现为"切号后原对话不见了"）；`appdata` 默认关。控制台「快照策略」里可切。 |
-| `launchArgs` | 重启 Qoder 时附加的命令行参数（字符串数组，非字符串会被丢弃）。 |
-| `exitAfterNoQoderSec` | 控制台服务在 Qoder 连续多少秒不在运行后自行退出，`0` = 常驻，默认 180。切换进行中豁免。 |
-
-## 支持的客户端布局
-
-按目录内容自动识别，两种布局共存：
-
-| 布局 | 数据目录 | 凭证真源 | 适用版本 |
-| --- | --- | --- | --- |
-| `v2` electron-root | `%APPDATA%\com.qodercn.app.stable` | `auth.v1.dat`（整文件即 v10 密文） | Qoder CN 0.4.3+ |
-| `v1` icube / VSCode fork | `%APPDATA%\QoderCN` | `User\globalStorage\state.vscdb` 键 `secret://aicoding.auth.userInfo` | ≤0.4.2 |
-
-**数据目录不写死**：优先解析运行中进程的 `--user-data-dir` 命令行参数，回退候选目录
-探测，可用 `QODER_DATA_DIR` 环境变量或 `config.json` 覆盖。
-
-> 客户端升级会换数据目录（0.4.2 及更早在 `%APPDATA%\QoderCN`，0.4.3 起在
-> `com.qodercn.app.stable`）。旧布局保存的槽位会被标记「布局不兼容」，切换前预检拦下、
-> 不会白关一次 IDE；在新客户端登录该账号后重新 `save` 即可恢复可用。
-
-## 控制台（UI）
+### 控制台（UI）
 
 启动方式与参数见[命令参考](#consolemjs--控制台启动器)。服务输出
 `CONSOLE_URL:http://127.0.0.1:<port>/?t=<token>`，**地址必须带 token**（不带会返回 403 提示页）。
@@ -280,7 +163,162 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
 - 切换进行中时页面所有写操作按钮置灰（服务端同时返回 409），`--stop` 也会拒绝执行——
   因为停服务用的是 `taskkill /T`，会把正在跑的切换子进程一起杀掉。
 
-## 安全与隐私
+### 命令参考
+
+`<插件根>` = 本 README 所在目录。所有命令都写成 `node --no-warnings <插件根>/scripts/xxx.mjs`
+（`--no-warnings` 是为了压掉 `node:sqlite` 的实验特性警告，不是必需）。带 `--json` 的命令会在
+stdout 末尾多输出一行 `QAM_JSON:{...}`，控制台服务就是靠它解析的，脚本化时按前缀取即可。
+
+#### `accounts.mjs` — 槽位管理
+
+| 命令 | 作用 |
+| --- | --- |
+| `list [--json]` | 槽位简表 + 当前登录 + Qoder 进程状态 |
+| `status [--json]` | 详细状态：凭证缓存、签到记录、快照策略、锁、上一代备份 |
+| `save <id> [--name <n>] [--kill] [--json]` | 把当前登录态存进槽位 `<id>`（已存在则覆盖，旧代留成 `.bak`）。`--kill` 先关闭 Qoder 以尽量拷全（默认档位不需要）。 |
+| `rollback <id> --yes [--json]` | 槽位与上一代 `.bak` **互换**，可再执行一次换回 |
+| `remove <id> --yes [--json]` | 删除槽位（连带 `.bak`、`meta.bak`、凭证缓存） |
+| `rename <id> --name <n> [--json]` | 只改注册表里的备注名（不碰快照与凭证；80 字上限，`--name` 值不能以 `-` 开头） |
+| `doctor [--json]` | 环境自检：生效数据目录、布局、exe 解析结果、布局不兼容的槽位 |
+| `sessions [--json]` | 会话可见性诊断（只读计数与元信息，不读对话正文） |
+
+切换动作在 `switch.mjs`（见下）；`rename` 与控制台的 `/api/rename` 等价。
+
+槽位 id 规则：**字母/数字/`_`/`-`，1~64 字符**（id 会拼进快照目录名，非法 id 在入口直接拒绝，
+`../x`、`a/b`、超长一律报错/400）。`--name` 的值不能以 `-` 开头（会被当成开关）。
+
+#### `switch.mjs` — 账号切换
+
+```bash
+node --no-warnings scripts/switch.mjs switch <目标id> [--save-as <id>] [--no-save-current]
+                                                  [--no-restart] [--no-kill] [--force] [--json]
+```
+
+流程：预检（目标槽位存在 + 布局兼容 + **能解密出登录态**）→ 探测当前登录 → 关闭 Qoder →
+备份当前登录态到自己槽位 → 恢复目标快照 → **回读验证落地 uid** → 重启 Qoder。
+
+| 参数 | 作用 |
+| --- | --- |
+| `--save-as <id>` | 当前登录态存到指定槽位（默认按注册表里的当前账号） |
+| `--no-save-current` | 不备份当前登录态（**会丢当前账号的最新凭证**，谨慎） |
+| `--no-restart` | 切完不自动拉起 Qoder |
+| `--no-kill` | Qoder 正在运行就直接中止（避免边写边读损坏数据目录） |
+| `--force` | 顶掉别人的 `switch.lock`（只在确认上一个切换进程已卡死时用） |
+
+> ⚠ 切换会**关闭并重启 Qoder IDE**。如果 agent 正运行在这个 IDE 里，执行它就等于自断会话，
+> 所以请由用户在控制台点击确认，或在清楚后果的前提下手动跑 CLI。
+
+#### `signin.mjs` — 每日签到
+
+```bash
+node --no-warnings scripts/signin.mjs signin [id...] [--json]   # 不传 id = 全部已保存账号
+node --no-warnings scripts/signin.mjs history [n] [--json]      # 最近 n 条签到记录
+```
+
+签到**不需要切换账号**：当前账号用实时登录态，其余账号解密各自槽位（与令牌缓存比谁新）。
+活跃账号**只用不刷**（见[原理](#原理)里的轮换安全策略），非活跃账号过期时自动用
+refreshToken 续期并双写回缓存与快照。
+
+#### `console.mjs` — 控制台启动器
+
+```bash
+node --no-warnings scripts/console.mjs            # 启动或复用服务，并打开浏览器
+node --no-warnings scripts/console.mjs --no-browser
+node --no-warnings scripts/console.mjs --restart  # 改过服务端代码后用这个
+node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确 pid 停止
+```
+
+#### 环境变量
+
+| 变量 | 作用 | 默认 |
+| --- | --- | --- |
+| `QODER_AM_HOME` | 管理数据目录（槽位/注册表/缓存/日志/锁的根） | `~/.qoder-account-manager` |
+| `QODER_DATA_DIR` | 覆盖客户端数据目录的自动探测 | 自动（先读进程 `--user-data-dir`，再探候选目录） |
+| `QODER_EXE` | 指定 Qoder 可执行文件绝对路径 | 自动解析，顺序见下条说明 |
+| `QAM_PORT` | 控制台服务起始端口（占用时自动 +1，最多试 10 次） | `38117` |
+| `QAM_TOKEN` | 指定访问 token（不设则启动时随机生成一次性 token） | 随机 |
+| `QAM_QODER_PROC_NAME` | 进程名（自测/多实例用，一般别动） | `Qoder CN.exe` |
+
+> `QODER_AM_HOME` 必须对**每一次调用**生效（CLI 与控制台服务是两个进程）。只在某个终端里
+> 设一次，就会出现"两个数据目录并存、槽位看起来空了"的错觉。
+
+> **exe 解析顺序**：`QODER_EXE` → `config.exePath` → **运行中进程的镜像路径**（PowerShell 查）
+> → 安装根扫描（`%LOCALAPPDATA%\Programs`、`C:\Program Files`、`C:\Program Files (x86)` 下的
+> `Qoder CN`/`Qoder`/`qoder-cn`，外加从 `accounts.json` 里已记录过的 exePath **反推出的安装根**，
+> 所以支持 `.qoder-versions/<版本>/` 多版本布局并自动取最新版）→ 注册表里那条可能已过期的
+> exePath。**装在非常见位置不需要改代码**：设 `QODER_EXE` 或把路径写进 `config.exePath` 就行；
+> 只要成功解析过一次，之后靠反推的根目录也能找到。`accounts.mjs doctor` 会打印本次解析结果。
+
+#### `config.json`（管理数据目录下）
+
+```json
+{
+  "dataDir": null,
+  "layout": null,
+  "tiers": { "core": true, "browser": false, "appdata": false },
+  "exePath": null,
+  "launchArgs": [],
+  "exitAfterNoQoderSec": 180
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `dataDir` / `exePath` | 手动覆盖自动探测结果（`null` = 自动）。平时用自定义 `--user-data-dir` 启动的人要填这里。 |
+| `layout` | 保留字段，布局一律按目录内容实测，写了也不生效。 |
+| `tiers` | 快照档位。`core` 不可关；`browser` **默认关**（开着会把会话视图状态一起换走，表现为"切号后原对话不见了"）；`appdata` 默认关。控制台「快照策略」里可切。 |
+| `launchArgs` | 重启 Qoder 时附加的命令行参数（字符串数组，非字符串会被丢弃）。 |
+| `exitAfterNoQoderSec` | 控制台服务在 Qoder 连续多少秒不在运行后自行退出，`0` = 常驻，默认 180。切换进行中豁免。 |
+
+### 故障排查
+
+| 症状 | 判断与处置 |
+| --- | --- |
+| 打开页面显示 403 | 地址没带 `?t=<token>`。重新跑 `console.mjs` 拿完整地址；token 绑进程，`--restart` 后会变。 |
+| 页面突然点不动 / 连接被拒 | 大概率是服务按设计自退了（Qoder 连续 180s 不在运行）。看 `config.exitAfterNoQoderSec`，想常驻设 `0`。重开 Qoder 再 `/account-console`，槽位数据不受影响。 |
+| 显示的「当前登录」不是我正在用的账号 | 先 `accounts.mjs doctor`，核对「生效数据目录」与「布局」。客户端升级换数据目录时，插件可能读到一个已停用的旧目录。 |
+| 切完身份没变，像没生效 | ① 看 `switch.log` 是否报 `identity-mismatch`；② 平时用自定义 `--user-data-dir` 启动的，必须把该目录写进 `config.dataDir` 且把参数写进 `config.launchArgs`，否则切换写 A 目录、重启读 B 目录。 |
+| 点保存/签到/删除返回 409 | `switch.lock` 有效，说明有一次切换正在跑，这是保护不是坏了；页面写按钮同步置灰。 |
+| 明明没在切换却一直报锁 | 上一个切换进程被 IDE 的 Job Object 连带回收时来不及清锁。超过 15 分钟会被识别为陈旧锁自动放行；CLI 急着用可加 `--force`（日志会写明顶掉了谁）。 |
+| 槽位标了「布局不兼容」 | 那是旧布局的快照，客户端已升级，**无法恢复**。在新客户端登录该账号后重新 `save`。切换在关闭 IDE **之前**就会预检拦下，不会白关一次。 |
+| 签到报 `permanent_auth` | 该账号在别处登录导致 refreshToken 轮换作废。切回该账号登录一次再 `save`（缓存与快照同时刷新）。 |
+| 签到报 `live_expired` | 活跃账号的 access token 过期，且刻意不在它背后刷新。打开一次 IDE 让客户端自行续期。 |
+| 槽位「全空了」 | 几乎一定是某次调用用了不同的 `QODER_AM_HOME`（或只在某个 shell 里临时设过）。把两个目录都 `ls` 一下对比。 |
+| 备注名变成乱码字符 | 请求体非合法 UTF-8 会被 400 拒绝：Git Bash 里用 curl 传中文会被转成 GBK。改用页面输入或 ASCII 名字。 |
+| 端口被占用 | 服务从 38117 起自动 +1 探测（最多 10 次），以输出的 `CONSOLE_URL` 为准；要固定端口设 `QAM_PORT`。 |
+| 改了 `scripts/*.mjs` 却像没生效 | IDE 加载的是注册表 `installPath` 那份（走本地安装入口时在 `plugins/cache/local/<name>/<version>/`），而你改的可能是仓库或手工副本。用[开发与自测](#开发与自测)里的命令现取目标路径再同步，然后 `console.mjs --restart`。 |
+| 版本号显示不对 | 只有**重装**才会把注册表里的 `version` 跟着清单走（加载不刷新它）。走一次 IDE 的本地安装入口即可对齐。 |
+| 切号后 IDE 里看不到旧对话 | 先用 `accounts.mjs sessions` 对比计数（或控制台的会话面板）。计数不变就是**视图层**的事，别盲目改档位或手工动文件；默认 `browser` 档关闭正是为了让会话列表保持连续。 |
+| 任何命令都报 `No such built-in module: node:sqlite` | Node 低于 22.13/23.4，`node:sqlite` 还在 flag 后面（或压根没有）。这是硬失败，整套命令都起不来，升 Node 而不是绕路。临时验证可试 `node --experimental-sqlite …`。 |
+
+> ⚠ 排障时**绝不要用 `taskkill /IM node.exe`** 去"清理一下"。Qoder 自己派生了很多
+> `node.exe` 子进程，一刀切会把 IDE 的正常功能和你自己的控制台服务一起干掉。停服务只用
+> `node --no-warnings scripts/console.mjs --stop`（按 `server.json` 里的精确 pid 停）。
+
+### 卸载与数据清理
+
+没有安装器，也就没有卸载器——插件是纯目录：
+
+```bash
+# 1) 卸掉插件本体（skills/commands 入口消失；账号数据完好保留）
+#    路径以注册表的 installPath 为准：走本地安装入口时在 cache 下，手工放置时在 plugins/ 下
+rm -rf ~/.qoder-cn/plugins/cache/local/qoder-account-manager      # IDE 安装入口那份
+rm -rf ~/.qoder-cn/plugins/qoder-account-manager                  # 手工放置那份（可能不存在）
+
+# 2) 连运行数据一起清掉（所有槽位作废，每个账号都要重新登录一次再 save）
+rm -rf ~/.qoder-account-manager
+```
+
+- 走 IDE 的卸载入口更省事（它会自己清注册表条目和缓存目录）；上面两条是给"文件还留着但
+  入口没了"或反之的情况兜底用的。
+- 只做第 1 步，之后重装回来时 `~/.qoder-account-manager` 里的槽位**原样可用**，
+  这正是数据目录与插件目录分开的原因。
+- 第 2 步之前想留个念想：`snapshots/` 是登录态密文、`creds/` 是明文令牌，**两者都等同于
+  账号本身**，要备份就按"保管密码"的级别处理，不要放同步盘。
+
+## 第二部分 · 数据与边界
+
+### 安全与隐私
 
 这是本工具唯一的"安全模型"，逐条说清楚，方便你自己判断能不能接受：
 
@@ -315,7 +353,124 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
   这正是 Qoder 自己做的事。它不试图解决"这台机器已被其他进程控制"的威胁模型——任何能
   在你的用户会话里执行代码的进程，理论上都能做同样的解密。
 
-## 原理
+### 支持的客户端布局
+
+按目录内容自动识别，两种布局共存：
+
+| 布局 | 数据目录 | 凭证真源 | 适用版本 |
+| --- | --- | --- | --- |
+| `v2` electron-root | `%APPDATA%\com.qodercn.app.stable` | `auth.v1.dat`（整文件即 v10 密文） | Qoder CN 0.4.3+ |
+| `v1` icube / VSCode fork | `%APPDATA%\QoderCN` | `User\globalStorage\state.vscdb` 键 `secret://aicoding.auth.userInfo` | ≤0.4.2 |
+
+**数据目录不写死**：优先解析运行中进程的 `--user-data-dir` 命令行参数，回退候选目录
+探测，可用 `QODER_DATA_DIR` 环境变量或 `config.json` 覆盖。
+
+> 客户端升级会换数据目录（0.4.2 及更早在 `%APPDATA%\QoderCN`，0.4.3 起在
+> `com.qodercn.app.stable`）。旧布局保存的槽位会被标记「布局不兼容」，切换前预检拦下、
+> 不会白关一次 IDE；在新客户端登录该账号后重新 `save` 即可恢复可用。
+
+### 目录与数据
+
+```text
+qoder-account-manager/
+  .qoder-plugin/plugin.json      # 插件清单
+  CHANGELOG.md                   # 版本变更（按 vX.Y.Z 倒序，不在 README 里重复）
+  LICENSE                        # MIT
+  README.md
+  assets/avatar.svg              # logo
+  assets/console.html            # 控制台前端（单文件、零外部依赖、离线可用）
+  skills/account-console/        # 控制台启动
+  skills/account-switch/         # 账号切换
+  skills/daily-signin/           # 每日签到
+  skills/account-status/         # 状态查看与环境自检
+  commands/console.md            # 命令定义（本构建不暴露 commands，实际入口是 skill）
+  commands/switch-account.md     # /switch-account
+  commands/signin.md             # /signin
+  commands/accounts.md           # /accounts
+  scripts/qoder_lib.mjs          # 共享库（布局探测/解密/快照/API）
+  scripts/status.mjs             # 状态汇总（CLI 与控制台共用同一数据出口）
+  scripts/accounts.mjs           # 槽位管理 CLI（含 doctor）
+  scripts/switch.mjs             # 切换 CLI
+  scripts/signin.mjs             # 签到 CLI
+  scripts/server.mjs             # 控制台 HTTP 服务
+  scripts/console.mjs            # 控制台启动器（detached）
+  scripts/dpapi_unprotect.ps1    # DPAPI 解密助手（stdin/stdout base64）
+```
+
+插件本体在 IDE 的插件目录下（约 280K，全是可重下的代码；走 IDE 本地安装入口时具体位置是
+`~/.qoder-cn/plugins/cache/local/qoder-account-manager/<version>/`，手工放置时是
+`~/.qoder-cn/plugins/qoder-account-manager/`）；**运行数据另存在 `~/.qoder-account-manager/`**
+（几个槽位约 40K，含登录态快照），两者刻意分开：
+
+- **升级/重装/卸载插件都不能动账号**：插件目录归 IDE 的插件机制管，随时可能被覆盖或删除；
+  登录态快照一旦被带走，所有槽位全部作废，只能重新逐个登录。
+- **写权限与进程边界**：IDE 加载插件目录时可能持有文件句柄，把频繁读写的日志/锁/快照
+  放进去容易撞车；运行时往自己目录写文件也会被插件更新流程覆盖。
+- **一份副本可能被多个入口同时读写**（CLI、控制台服务、切换子进程），放在数据目录里路径
+  唯一、行为可控。
+
+想把它挪到别处（比如换盘、或不想在 home 下留目录）：设环境变量 `QODER_AM_HOME`，所有脚本
+与控制台服务都从这里取根路径。
+
+```bash
+QODER_AM_HOME=D:\qoder-accounts node --no-warnings scripts/console.mjs
+```
+
+> 注意：这个环境变量必须对**每一次调用**都生效（CLI 与控制台服务是两个进程），否则会出现
+> 两个数据目录并存、槽位"看起来丢了"的错觉。想长期换位置，建议用系统级环境变量，或做个
+> 小启动脚本，别只设在某个终端里。
+
+```text
+~/.qoder-account-manager/
+  accounts.json        # 账号注册表（id/备注/uid/脱敏身份/布局/exe 路径；不含任何令牌）
+  config.json          # 数据目录/exe 覆盖、快照档位、launchArgs、exitAfterNoQoderSec（默认 180，0=常驻）
+  server.json          # 控制台服务地址与 token（尽量按 0600 创建；Windows 上实际权限继承目录 ACL）
+  switch.log           # 最近一次切换的进度输出（每次启动切换都重写）
+  switch.lock          # 切换互斥锁（pid/目标/时间戳），进程退出即清除，陈旧锁自动识别
+  snapshots/<id>/      # 登录态快照（含凭证密文，等同登录态，勿外传）
+  snapshots/<id>.bak   # 上一代快照（可 rollback 换回来）
+  snapshots/<id>.meta.json      # 槽位元数据（布局/保存时间/未拷全条目/告警）
+  snapshots/<id>.meta.json.bak  # 上一代的元数据（与 .bak 配对，回退时一起换）
+  creds/<id>.json      # 令牌缓存（save 时同步、刷新后双写；明文，仅本机，等同登录态）
+  signin-log.json      # 签到日志（滚动 200 条）
+```
+
+### 已知边界
+
+- 客户端只存单账号，**无原生多账号切换**，本插件靠快照交换实现。
+- **「切号后继续之前的对话」已端到端验证过一次**（acct2 → acct1，见[原理](#原理)里的实测
+  记录）：落地身份由脚本回读核对，会话数据一条没少，IDE 的会话列表里切换前创建的对话仍在。
+  这只覆盖 v2 布局 + 默认档位这一条路径的一次切换；v1 旧布局、开 `browser` 档、以及
+  多工作区跨账号可见性都还没实测过。若哪天出现"看不到旧对话"，先用
+  `accounts.mjs sessions` 对比计数：计数不变就是视图层的事，别盲目改档位或手工动文件。
+- **默认档位下运行中保存是完全可靠的**（只碰 4 个小身份文件，0 告警）。若手动打开
+  `browser` 档，`Network/Cookies` 会被 Chromium 独占（连共享读都拒绝，字节级
+  read/write 回退也失败）而跳过并告警；身份靠 `auth.v1.dat`，缺 cookie 不影响切号后
+  登录，且恢复时对不完整目录降级为合并，不会删掉实时 cookie。要完整快照请关闭
+  Qoder 后 `save <id> --kill`。
+- 默认档位下各账号**共用同一份对话列表**（`main.sqlite` 不交换）——这正是"切号续聊"
+  的实现方式，也意味着账号 B 能看到账号 A 的对话。需要隔离时打开 `browser` 档。
+- 非当前登录账号的签到凭证来自其槽位快照与令牌缓存，**取更新的那一份**（缓存可能装着已被
+  服务端轮换作废的旧 refreshToken）；若该账号在别处登录导致刷新令牌轮换失效，会提示
+  `permanent_auth`，需切回该账号重新 `save`。
+- **如果你平时用自定义 `--user-data-dir` 启动 Qoder**：请把那个目录同时写进
+  `config.json` 的 `dataDir`，并把启动参数放进 `config.launchArgs`（数组），否则切换写的是
+  探测到的目录、重启后客户端又读回它自己的默认目录，看起来就像"切换没生效"。
+  `accounts.mjs doctor` 会打印当前生效的数据目录，先核对再排障。
+- 活跃账号 token 过期时返回 `live_expired` 而不代为刷新（见轮换安全策略）。
+- **令牌刷新 + 回写快照这条路径尚未实测**：验证它需要轮换掉当前账号的刷新令牌，
+  风险不对等，故刻意未触发。代码含写回前解密自校验与失败回滚。
+- **服务生命周期只验过 `taskkill` 这一条路径**（IDE 被强杀后服务仍在）。IDE 正常退出、
+  崩溃、关机时服务会被怎样，没有实测结论，所以文档里不承诺任何一侧。
+- `auth.machine-id` 随快照交换（每账号绑定各自设备标识）；未实现浏览器指纹隔离，
+  两账号在同一台机器上共享硬件层指纹，风控风险自控。
+- 若客户端未来启用 app-bound encryption，外部进程将无法解密，`getAesKey` 会明确报错
+  而非静默失败。
+- **仅 Windows**：DPAPI / `tasklist` / `taskkill` / 进程探测都是 Win32 的。macOS/Linux
+  需要重写解密后端（keychain / libsecret）才能工作，当前没有实现。
+## 第三部分 · 开发者参考
+
+### 原理
 
 - **登录态快照白名单（v2，分档可配）**
   - `core`（不可关，默认开）：`auth.v1.dat`、`Local State`、`auth.machine-id`、
@@ -381,96 +536,7 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
   IDE 自行续期。
 - **风控内建**：claim 间隔 1~3s 随机抖动；token 全程不输出到终端/日志/HTTP 响应。
 
-## 目录与数据
-
-```text
-qoder-account-manager/
-  CHANGELOG.md                     # 版本变更（按 未发布/vX.Y.Z 分组，不在 README 里重复）
-  .qoder-plugin/plugin.json      # 插件清单
-  assets/avatar.svg              # 本地生成的 logo
-  assets/console.html            # 控制台前端（单文件、零外部依赖、离线可用）
-  skills/account-console/        # 控制台启动
-  skills/account-switch/         # 账号切换
-  skills/daily-signin/           # 每日签到
-  skills/account-status/         # 状态查看与环境自检
-  commands/console.md            # 命令定义（本构建不暴露 commands，实际入口是 skill）
-  commands/switch-account.md     # /switch-account
-  commands/signin.md             # /signin
-  commands/accounts.md           # /accounts
-  scripts/qoder_lib.mjs          # 共享库（布局探测/解密/快照/API）
-  scripts/status.mjs             # 状态汇总（CLI 与控制台共用同一数据出口）
-  scripts/accounts.mjs           # 槽位管理 CLI（含 doctor）
-  scripts/switch.mjs             # 切换 CLI
-  scripts/signin.mjs             # 签到 CLI
-  scripts/server.mjs             # 控制台 HTTP 服务
-  scripts/console.mjs            # 控制台启动器（detached）
-  scripts/dpapi_unprotect.ps1    # DPAPI 解密助手（stdin/stdout base64）
-```
-
-插件本体在 IDE 的插件目录下（约 280K，全是可重下的代码；走 IDE 本地安装入口时具体位置是
-`~/.qoder-cn/plugins/cache/local/qoder-account-manager/<version>/`，手工放置时是
-`~/.qoder-cn/plugins/qoder-account-manager/`）；**运行数据另存在 `~/.qoder-account-manager/`**
-（几个槽位约 40K，含登录态快照），两者刻意分开：
-
-- **升级/重装/卸载插件都不能动账号**：插件目录归 IDE 的插件机制管，随时可能被覆盖或删除；
-  登录态快照一旦被带走，所有槽位全部作废，只能重新逐个登录。
-- **写权限与进程边界**：IDE 加载插件目录时可能持有文件句柄，把频繁读写的日志/锁/快照
-  放进去容易撞车；运行时往自己目录写文件也会被插件更新流程覆盖。
-- **一份副本可能被多个入口同时读写**（CLI、控制台服务、切换子进程），放在数据目录里路径
-  唯一、行为可控。
-
-想把它挪到别处（比如换盘、或不想在 home 下留目录）：设环境变量 `QODER_AM_HOME`，所有脚本
-与控制台服务都从这里取根路径。
-
-```bash
-QODER_AM_HOME=D:\qoder-accounts node --no-warnings scripts/console.mjs
-```
-
-> 注意：这个环境变量必须对**每一次调用**都生效（CLI 与控制台服务是两个进程），否则会出现
-> 两个数据目录并存、槽位"看起来丢了"的错觉。想长期换位置，建议用系统级环境变量，或做个
-> 小启动脚本，别只设在某个终端里。
-
-```text
-~/.qoder-account-manager/
-  accounts.json        # 账号注册表（id/备注/uid/脱敏身份/布局/exe 路径；不含任何令牌）
-  config.json          # 数据目录/exe 覆盖、快照档位、launchArgs、exitAfterNoQoderSec（默认 180，0=常驻）
-  server.json          # 控制台服务地址与 token（尽量按 0600 创建；Windows 上实际权限继承目录 ACL）
-  switch.log           # 最近一次切换的进度输出（每次启动切换都重写）
-  switch.lock          # 切换互斥锁（pid/目标/时间戳），进程退出即清除，陈旧锁自动识别
-  snapshots/<id>/      # 登录态快照（含凭证密文，等同登录态，勿外传）
-  snapshots/<id>.bak   # 上一代快照（可 rollback 换回来）
-  snapshots/<id>.meta.json      # 槽位元数据（布局/保存时间/未拷全条目/告警）
-  snapshots/<id>.meta.json.bak  # 上一代的元数据（与 .bak 配对，回退时一起换）
-  creds/<id>.json      # 令牌缓存（save 时同步、刷新后双写；明文，仅本机，等同登录态）
-  signin-log.json      # 签到日志（滚动 200 条）
-```
-
-## 故障排查
-
-| 症状 | 判断与处置 |
-| --- | --- |
-| 打开页面显示 403 | 地址没带 `?t=<token>`。重新跑 `console.mjs` 拿完整地址；token 绑进程，`--restart` 后会变。 |
-| 页面突然点不动 / 连接被拒 | 大概率是服务按设计自退了（Qoder 连续 180s 不在运行）。看 `config.exitAfterNoQoderSec`，想常驻设 `0`。重开 Qoder 再 `/account-console`，槽位数据不受影响。 |
-| 显示的「当前登录」不是我正在用的账号 | 先 `accounts.mjs doctor`，核对「生效数据目录」与「布局」。客户端升级换数据目录时，插件可能读到一个已停用的旧目录。 |
-| 切完身份没变，像没生效 | ① 看 `switch.log` 是否报 `identity-mismatch`；② 平时用自定义 `--user-data-dir` 启动的，必须把该目录写进 `config.dataDir` 且把参数写进 `config.launchArgs`，否则切换写 A 目录、重启读 B 目录。 |
-| 点保存/签到/删除返回 409 | `switch.lock` 有效，说明有一次切换正在跑，这是保护不是坏了；页面写按钮同步置灰。 |
-| 明明没在切换却一直报锁 | 上一个切换进程被 IDE 的 Job Object 连带回收时来不及清锁。超过 15 分钟会被识别为陈旧锁自动放行；CLI 急着用可加 `--force`（日志会写明顶掉了谁）。 |
-| 槽位标了「布局不兼容」 | 那是旧布局的快照，客户端已升级，**无法恢复**。在新客户端登录该账号后重新 `save`。切换在关闭 IDE **之前**就会预检拦下，不会白关一次。 |
-| 签到报 `permanent_auth` | 该账号在别处登录导致 refreshToken 轮换作废。切回该账号登录一次再 `save`（缓存与快照同时刷新）。 |
-| 签到报 `live_expired` | 活跃账号的 access token 过期，且刻意不在它背后刷新。打开一次 IDE 让客户端自行续期。 |
-| 槽位「全空了」 | 几乎一定是某次调用用了不同的 `QODER_AM_HOME`（或只在某个 shell 里临时设过）。把两个目录都 `ls` 一下对比。 |
-| 备注名变成乱码字符 | 请求体非合法 UTF-8 会被 400 拒绝：Git Bash 里用 curl 传中文会被转成 GBK。改用页面输入或 ASCII 名字。 |
-| 端口被占用 | 服务从 38117 起自动 +1 探测（最多 10 次），以输出的 `CONSOLE_URL` 为准；要固定端口设 `QAM_PORT`。 |
-| 改了 `scripts/*.mjs` 却像没生效 | IDE 加载的是注册表 `installPath` 那份（走本地安装入口时在 `plugins/cache/local/<name>/<version>/`），而你改的可能是仓库或手工副本。用[开发与自测](#开发与自测)里的命令现取目标路径再同步，然后 `console.mjs --restart`。 |
-| 版本号显示不对 | 只有**重装**才会把注册表里的 `version` 跟着清单走（加载不刷新它）。走一次 IDE 的本地安装入口即可对齐。 |
-| 切号后 IDE 里看不到旧对话 | 先用 `accounts.mjs sessions` 对比计数（或控制台的会话面板）。计数不变就是**视图层**的事，别盲目改档位或手工动文件；默认 `browser` 档关闭正是为了让会话列表保持连续。 |
-| 任何命令都报 `No such built-in module: node:sqlite` | Node 低于 22.13/23.4，`node:sqlite` 还在 flag 后面（或压根没有）。这是硬失败，整套命令都起不来，升 Node 而不是绕路。临时验证可试 `node --experimental-sqlite …`。 |
-
-> ⚠ 排障时**绝不要用 `taskkill /IM node.exe`** 去"清理一下"。Qoder 自己派生了很多
-> `node.exe` 子进程，一刀切会把 IDE 的正常功能和你自己的控制台服务一起干掉。停服务只用
-> `node --no-warnings scripts/console.mjs --stop`（按 `server.json` 里的精确 pid 停）。
-
-## 开发与自测
+### 开发与自测
 
 - **改前端不用重启**：`assets/console.html` 每次请求现读，浏览器刷新即生效；改 `scripts/*.mjs`
   则要 `console.mjs --restart`（服务进程已把代码载入内存）。
@@ -489,69 +555,16 @@ QODER_AM_HOME=D:\qoder-accounts node --no-warnings scripts/console.mjs
   手工放置副本，只有第二处决定实际跑的是什么。从仓库同步过去，目标路径现取：
   ```bash
   TARGET=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.USERPROFILE+"/.qoder-cn/plugins/installed_plugins_v2.json","utf8")).plugins["qoder-account-manager@local"][0].installPath)')
-  cp -r .qoder-plugin assets commands scripts skills README.md CHANGELOG.md "$TARGET/" && diff -r . "$TARGET" --exclude=.git
+  cp -r .qoder-plugin assets commands scripts skills README.md CHANGELOG.md LICENSE "$TARGET/" && diff -r . "$TARGET" --exclude=.git
   ```
   改完 `scripts/*.mjs` 要 `console.mjs --restart` 才生效，改 `skills/`、`commands/`、
   `.qoder-plugin/` 建议重启 IDE 重新扫描。数据都在 `~/.qoder-account-manager`，同步代码不影响槽位。
 - 发版前用 create-plugin 的离线校验器复核清单与目录结构（`validate_qoder_plugin.py <插件目录>`），
   再确认 `CHANGELOG.md` 的「未发布」已改写成版本段、`.qoder-plugin/plugin.json` 的 `version` 同步。
 
-## 已知边界
+### 许可
 
-- 客户端只存单账号，**无原生多账号切换**，本插件靠快照交换实现。
-- **「切号后继续之前的对话」已端到端验证过一次**（acct2 → acct1，见上面"对话保留"里的实测
-  记录）：落地身份由脚本回读核对，会话数据一条没少，IDE 的会话列表里切换前创建的对话仍在。
-  这只覆盖 v2 布局 + 默认档位这一条路径的一次切换；v1 旧布局、开 `browser` 档、以及
-  多工作区跨账号可见性都还没实测过。若哪天出现"看不到旧对话"，先用
-  `accounts.mjs sessions` 对比计数：计数不变就是视图层的事，别盲目改档位或手工动文件。
-- **默认档位下运行中保存是完全可靠的**（只碰 4 个小身份文件，0 告警）。若手动打开
-  `browser` 档，`Network/Cookies` 会被 Chromium 独占（连共享读都拒绝，字节级
-  read/write 回退也失败）而跳过并告警；身份靠 `auth.v1.dat`，缺 cookie 不影响切号后
-  登录，且恢复时对不完整目录降级为合并，不会删掉实时 cookie。要完整快照请关闭
-  Qoder 后 `save <id> --kill`。
-- 默认档位下各账号**共用同一份对话列表**（`main.sqlite` 不交换）——这正是"切号续聊"
-  的实现方式，也意味着账号 B 能看到账号 A 的对话。需要隔离时打开 `browser` 档。
-- 非当前登录账号的签到凭证来自其槽位快照与令牌缓存，**取更新的那一份**（缓存可能装着已被
-  服务端轮换作废的旧 refreshToken）；若该账号在别处登录导致刷新令牌轮换失效，会提示
-  `permanent_auth`，需切回该账号重新 `save`。
-- **如果你平时用自定义 `--user-data-dir` 启动 Qoder**：请把那个目录同时写进
-  `config.json` 的 `dataDir`，并把启动参数放进 `config.launchArgs`（数组），否则切换写的是
-  探测到的目录、重启后客户端又读回它自己的默认目录，看起来就像"切换没生效"。
-  `accounts.mjs doctor` 会打印当前生效的数据目录，先核对再排障。
-- 活跃账号 token 过期时返回 `live_expired` 而不代为刷新（见轮换安全策略）。
-- **令牌刷新 + 回写快照这条路径尚未实测**：验证它需要轮换掉当前账号的刷新令牌，
-  风险不对等，故刻意未触发。代码含写回前解密自校验与失败回滚。
-- **服务生命周期只验过 `taskkill` 这一条路径**（IDE 被强杀后服务仍在）。IDE 正常退出、
-  崩溃、关机时服务会被怎样，没有实测结论，所以文档里不承诺任何一侧。
-- `auth.machine-id` 随快照交换（每账号绑定各自设备标识）；未实现参考项目中的
-  指纹注入，两账号在同一台机器上共享硬件层指纹，风控风险自控。
-- 若客户端未来启用 app-bound encryption，外部进程将无法解密，`getAesKey` 会明确报错
-  而非静默失败。
-- **仅 Windows**：DPAPI / `tasklist` / `taskkill` / 进程探测都是 Win32 的。macOS/Linux
-  需要重写解密后端（keychain / libsecret）才能工作，当前没有实现。
+MIT，见 [LICENSE](LICENSE)。作者对因使用本工具导致的账号风控、数据丢失或服务条款纠纷
+不承担任何责任；请勿用它访问你不拥有的账号。
 
-## 卸载与数据清理
 
-没有安装器，也就没有卸载器——插件是纯目录：
-
-```bash
-# 1) 卸掉插件本体（skills/commands 入口消失；账号数据完好保留）
-#    路径以注册表的 installPath 为准：走本地安装入口时在 cache 下，手工放置时在 plugins/ 下
-rm -rf ~/.qoder-cn/plugins/cache/local/qoder-account-manager      # IDE 安装入口那份
-rm -rf ~/.qoder-cn/plugins/qoder-account-manager                  # 手工放置那份（可能不存在）
-
-# 2) 连运行数据一起清掉（所有槽位作废，每个账号都要重新登录一次再 save）
-rm -rf ~/.qoder-account-manager
-```
-
-- 走 IDE 的卸载入口更省事（它会自己清注册表条目和缓存目录）；上面这两条是给"文件还留着但
-  入口没了"或反之的情况兜底用的。
-
-- 只做第 1 步，之后重装回来时 `~/.qoder-account-manager` 里的槽位**原样可用**，
-  这正是数据目录与插件目录分开的原因。
-- 第 2 步之前想留个念想：`snapshots/` 是登录态密文、`creds/` 是明文令牌，**两者都等同于
-  账号本身**，要备份就按"保管密码"的级别处理，不要放同步盘。
-- IDE 的插件管理界面可能还缓存着旧条目，那是注册表（`installed_plugins_v2.json`）的显示
-  状态，不影响功能；重启 IDE 后会一致。这一点没做过专门验证，仅作提示。
-
-版本变更记录在 [CHANGELOG.md](CHANGELOG.md)，不在此重复。
