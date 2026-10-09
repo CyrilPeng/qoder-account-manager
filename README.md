@@ -326,7 +326,11 @@ rm -rf ~/.qoder-account-manager
   `server.json` 里的 token 一旦被别人拿到，对方就能以你的身份使用 Qoder。它们只在
   Windows 当前用户的 ACL 下（`server.json` 尽量按 0600 创建，Windows 实际继承目录权限）。
   **别把 `~/.qoder-account-manager/` 放进网盘/同步目录/备份到第三方，也别截图其中的文件。**
-  插件与页面输出全都只给脱敏字段（uid 掩码、邮箱/手机掩码）。
+  输出侧只给脱敏字段：uid 掩码、邮箱与手机掩码。
+  ⚠ 一个例外要知道：**昵称是原样显示的**，而用邮箱注册的账号，客户端把邮箱写进了
+  `user.name`——所以页面、CLI 甚至 `switch.log` 里会出现完整邮箱，那是账号自己的显示名，
+  不是解密出来的额外信息。截图或分享日志前把它一起当 PII 处理（`--name` 用昵称备注可以
+  改善可读性，但不会替换掉客户端给的 name）。
 - **token 全程不输出**：不打印到终端、不写进 `switch.log` / `signin-log.json`、不在任何
   HTTP 响应体里。CLI 的 `--json` 也只含掩码。若你哪天在任何输出里看到明文 token，那是 bug，
   请当安全事故报上来。
