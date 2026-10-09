@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Qoder 账号控制台</title>
+<style>
+:root{
+  --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+  --fg:#e6e9ef; --muted:#98a0b0; --dim:#6b7280;
+  --accent:#5b9dff; --ok:#3ecf8e; --warn:#f5a623; --err:#ff6b6b;
+  --radius:12px; --mono:ui-monospace,SFMono-Regular,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root{ --bg:#f5f6f8; --panel:#fff; --panel2:#f0f2f5; --line:#e2e5ea;
+         --fg:#1a1d23; --muted:#5c6472; --dim:#8b93a1; --accent:#2f6fe4; }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}
+.wrap{max-width:1080px;margin:0 auto;padding:28px 20px 80px}
+header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap}
+h1{font-size:20px;margin:0 0 4px;font-weight:650;letter-spacing:-.2px}
+.sub{color:var(--muted);font-size:12.5px;margin:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px}
+.card > h2{font-size:13px;margin:0 0 14px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.grid{display:grid;gap:12px}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:6px 14px;font-size:13px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-family:var(--mono);font-size:12.5px;word-break:break-all}
+button{font:inherit;border:1px solid var(--line);background:var(--panel2);color:var(--fg);
+  padding:7px 14px;border-radius:8px;cursor:pointer;transition:.15s;white-space:nowrap}
+button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:550}
+button.primary:hover:not(:disabled){filter:brightness(1.1);color:#fff}
+button.danger:hover:not(:disabled){border-color:var(--err);color:var(--err)}
+button.sm{padding:4px 10px;font-size:12.5px;border-radius:7px}
+input,select{font:inherit;background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+  padding:7px 11px;border-radius:8px;min-width:0}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+.slot{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px;position:relative}
+.slot.live{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok) inset}
+.slot.dead{border-color:var(--warn)}
+.slot-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}
+.slot-id{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.slot-name{font-size:15px;font-weight:600;margin:1px 0 2px}
+.slot-meta{font-size:12.5px;color:var(--muted);font-family:var(--mono)}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;border:1px solid var(--line);
+  color:var(--muted);font-weight:500;letter-spacing:.02em}
+.badge.ok{color:var(--ok);border-color:var(--ok)}
+.badge.warn{color:var(--warn);border-color:var(--warn)}
+.badge.err{color:var(--err);border-color:var(--err)}
+.badge.live{color:var(--ok);border-color:var(--ok)}
+.actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+pre{margin:0;font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word;
+  background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;max-height:320px;overflow:auto;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:550;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}
+td.mono{font-family:var(--mono);font-size:12px}
+.note{font-size:12.5px;color:var(--muted);margin:10px 0 0;padding-left:12px;border-left:2px solid var(--line)}
+.note.warn{border-color:var(--warn);color:var(--warn)}
+#toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);
+  background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+  padding:11px 18px;border-radius:9px;box-shadow:0 8px 28px rgba(0,0,0,.35);opacity:0;
+  transition:.22s;pointer-events:none;max-width:80vw;font-size:13px;z-index:99}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.ok{border-left-color:var(--ok)} #toast.err{border-left-color:var(--err)} #toast.warn{border-left-color:var(--warn)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);
+  border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.banner{display:none;padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:13.5px;
+  border:1px solid var(--warn);background:rgba(245,166,35,.08);color:var(--warn)}
+.banner.show{display:block}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+.modal.show{display:flex}
+.modal-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:460px;width:100%}
+.modal-box h3{margin:0 0 10px;font-size:16px}
+.modal-box p{margin:0 0 14px;color:var(--muted);font-size:13px}
+.checkline{display:flex;gap:12px;align-items:flex-start;margin:14px 0 2px;padding:12px 14px;
+  border:2px solid var(--warn);border-radius:10px;background:rgba(245,166,35,.10);cursor:pointer;
+  font-size:13.5px;line-height:1.6;transition:.15s;user-select:none;color:var(--fg)}
+.checkline:hover{background:rgba(245,166,35,.18)}
+.checkline.checked{border-color:var(--ok);background:rgba(62,207,142,.12)}
+.checkline.checked .ack-hint{color:var(--ok)}
+.checkline.checked input[type=checkbox]{box-shadow:0 0 0 2px var(--ok)}
+/* 复选框单独放大：通用 input 规则给的是深色面板底 + 深色边，13px 的原生框在深色主题下
+   几乎看不见（用户反馈"看起来像个小点"），二次确认框看不清就等于没有二次确认。 */
+.checkline input[type=checkbox]{flex:0 0 auto;width:24px;height:24px;margin:1px 0 0;padding:0;
+  border:0;background:var(--panel);accent-color:var(--ok);cursor:pointer;
+  /* 原生复选框不吃 border（Chromium 忽略），所以用外圈 box-shadow 做描边：
+     未勾选橙色圈、勾上绿色圈，深色主题下才不至于缩成一个看不见的小点 */
+  box-shadow:0 0 0 2px var(--warn);border-radius:6px}
+.checkline .ack-text{flex:1;min-width:0}
+.ack-hint{display:block;margin-top:6px;font-size:12px;color:var(--muted)}
+input[type=checkbox]{accent-color:var(--accent)}
+.tiers input[type=checkbox]{width:17px;height:17px;margin:0}
+.tiers{display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
+.tiers label{display:flex;gap:7px;align-items:center;cursor:pointer}
+.tiers input{width:auto}
+code{font-family:var(--mono);font-size:12px;background:var(--panel2);padding:1px 5px;border-radius:4px}
+.empty{color:var(--dim);font-size:13px;padding:14px 0;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Qoder 账号控制台</h1>
+      <p class="sub" id="envline">正在读取环境…</p>
+    </div>
+    <div class="row">
+      <button class="sm" id="btn-refresh">刷新</button>
+      <button class="sm" id="btn-doctor">环境自检</button>
+      <button class="primary" id="btn-signin-all">一键全员签到</button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <section class="card">
+    <h2>当前登录</h2>
+    <div id="live">—</div>
+  </section>
+
+  <section class="card">
+    <h2>账号槽位</h2>
+    <div class="grid" id="slots"></div>
+    <div class="row" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line)">
+      <input id="new-id" placeholder="槽位 id（如 acct2）" style="flex:1;min-width:130px">
+      <input id="new-name" placeholder="备注名（可选）" style="flex:1.4;min-width:150px">
+      <button class="primary" id="btn-save">保存当前账号为新槽位</button>
+    </div>
+    <p class="note" id="save-note">
+      保存会把当前 IDE 登录态快照到本地。Qoder 运行中也能存，但 <code>Network/Cookies</code>
+      会被浏览器进程独占而跳过（不影响切号后登录，身份靠 <code>auth.v1.dat</code>）。要 100% 完整快照就关掉 Qoder 再存。
+    </p>
+  </section>
+
+  <section class="card" id="switch-panel" style="display:none">
+    <h2>切换进度</h2>
+    <pre id="switch-log">等待输出…</pre>
+  </section>
+
+  <section class="card">
+    <h2>签到日志</h2>
+    <div id="logwrap"><div class="empty">暂无记录</div></div>
+  </section>
+
+  <section class="card">
+    <h2>会话可见性 · 切号前后对比</h2>
+    <div class="row" style="margin-bottom:12px">
+      <button class="sm" id="btn-sessions">重新检测</button>
+      <button class="sm" id="btn-sess-baseline" title="把当前会话总数记为切换前基线，切换后再点「重新检测」即可对比">记为切换前基线</button>
+      <span class="sub" id="sess-hint">只读 main.sqlite 的计数与元信息，不读对话正文</span>
+    </div>
+    <div id="sesswrap"><div class="empty">点击「重新检测」读取本地会话统计</div></div>
+    <p class="note" id="sess-note"></p>
+  </section>
+
+  <section class="card">
+    <h2>快照策略</h2>
+    <div class="tiers" id="tiers"></div>
+    <div class="row" style="margin-top:14px">
+      <span class="sub" style="flex:1">IDE 退出后自动结束本服务的等待秒数</span>
+      <input id="wd-sec" type="number" min="0" max="86400" step="30" style="width:110px">
+      <button class="sm" id="btn-wd">应用</button>
+      <span class="sub">0 = 常驻；想在 IDE 关着的时候也从页面签到/切换，就设 0</span>
+    </div>
+    <p class="note" id="wl-note"></p>
+  </section>
+</div>
+
+<div id="toast"></div>
+
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <h3 id="m-title">确认切换账号</h3>
+    <p id="m-body"></p>
+    <div id="m-extra"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:18px">
+      <button id="m-cancel">取消</button>
+      <button class="primary" id="m-ok">确认</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const H = { 'Content-Type':'application/json', 'x-qam-token': TOKEN };
+let STATUS = null, BUSY = false, SWITCH_POLL = null;
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg, kind='') {
+  const t = $('#toast');
+  t.textContent = msg; t.className = 'show ' + kind;
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = '', 4200);
+}
+
+async function api(path, opts = {}) {
+  const sep = path.includes('?') ? '&' : '?';
+  const res = await fetch(path + sep + 't=' + encodeURIComponent(TOKEN), { headers: H, ...opts });
+  const ct = res.headers.get('content-type') || '';
+  const data = ct.includes('json') ? await res.json() : { ok: res.ok, text: await res.text() };
+  if (!res.ok && !data.error) data.error = 'HTTP ' + res.status;
+  return data;
+}
+
+// 通用确认弹窗（返回 Promise）
+function confirmDialog({ title, body, okText='确认', extra='' }) {
+  return new Promise((resolve) => {
+    $('#m-title').textContent = title;
+    $('#m-body').innerHTML = body;
+    $('#m-extra').innerHTML = extra;
+    $('#m-ok').textContent = okText;
+    $('#modal').classList.add('show');
+    const cb = $('#m-ack');
+    const box = cb ? cb.closest('.checkline') : null;
+    const hint = box ? box.querySelector('.ack-hint') : null;
+    const okBtn = $('#m-ok');
+    if (box) box.classList.remove('checked');
+    // 有勾选框时，主按钮先锁着：光靠"点了再提示你先勾选"太容易让人以为按钮坏了，
+    // 也让二次确认形同虚设。按钮文字与提示行同时说明它在等什么、等到了什么。
+    const paint = () => {
+      const locked = Boolean(cb) && !cb.checked;
+      okBtn.disabled = locked;
+      okBtn.textContent = locked ? okText + '（先勾选）' : okText;
+      if (hint) hint.textContent = locked ? hint.dataset.pending : hint.dataset.done;
+    };
+    const done = (v) => { $('#modal').classList.remove('show');
+      if (cb) cb.onchange = null;
+      $('#m-ok').onclick = null; $('#m-cancel').onclick = null;
+      okBtn.disabled = false; resolve(v); };
+    if (cb) cb.onchange = () => {
+      if (box) box.classList.toggle('checked', cb.checked);
+      paint();
+    };
+    paint();
+    $('#m-ok').onclick = () => {
+      if (cb && !cb.checked) { toast('请先勾选上方的确认框', 'warn'); return; }
+      done(true);
+    };
+    $('#m-cancel').onclick = () => done(false);
+  });
+}
+
+function fmtLeft(ms) {
+  if (!ms) return '';
+  const d = ms - Date.now();
+  if (d <= 0) return '已过期';
+  const h = Math.floor(d/3600000), dd = Math.floor(h/24);
+  return dd > 0 ? `剩 ${dd} 天` : `剩 ${h} 小时`;
+}
+
+// 服务端的自动退出状态：remaining 由 /api/status 给，页面本地每秒递减，
+// 免得 15s 一次的探测让倒计时看起来一跳一跳的。
+const WD = { active: false, remaining: null, limit: null };
+function banner(text) {
+  const b = $('#banner');
+  b.textContent = text; b.className = 'banner show';
+}
+
+function render(s) {
+  STATUS = s;
+  const w = s.watchdog || {};
+  WD.limit = w.sec ?? null;
+  WD.active = Boolean(w.enabled) && typeof w.remainingSec === 'number';
+  WD.remaining = WD.active ? w.remainingSec : null;
+  const i = s.install;
+  $('#envline').innerHTML =
+    `${esc(i.layoutLabel)} · Qoder ${i.running ? '<span style="color:var(--ok)">运行中</span>' : '<span style="color:var(--dim)">未运行</span>'}`
+    + ` · <code>${esc(i.dataDir)}</code>`;
+
+  // 顶部横幅优先级：切换进行中 > IDE 已退出（服务即将自动退出）> 隐藏
+  if (s.switching) {
+    banner(`切换进行中：目标 ${s.switching.target || '?'}，已 `
+      + `${Math.round((s.switching.ageMs || 0) / 1000)}s。请等它完成（页面会自动刷新结果）。`);
+  } else if (WD.active) {
+    banner(`Qoder 未运行，控制台服务将在约 ${WD.remaining}s 后自动退出以释放内存。`
+      + '槽位与登录数据都已落盘，重新打开 Qoder 再跑 /account-console 即可。');
+  } else if (!$('#switch-panel').dataset.watching) {
+    $('#banner').className = 'banner';
+  }
+
+  // ── 当前登录 ──
+  if (s.live) {
+    const L = s.live;
+    $('#live').innerHTML = `<dl class="kv">
+      <dt>账号</dt><dd>${esc(L.label)}</dd>
+      <dt>uid</dt><dd>${esc(L.uidMasked)}</dd>
+      <dt>token 过期</dt><dd>${esc(L.tokenExpiresAt||'-')} <span class="badge ${L.tokenExpiresAtMs>Date.now()?'ok':'err'}">${fmtLeft(L.tokenExpiresAtMs)}</span></dd>
+      <dt>refresh 过期</dt><dd>${esc(L.refreshExpiresAt||'-')}</dd>
+    </dl>
+    <p class="note">请核对以上身份是否为你预期的账号。本地凭证里 email 字段可能为空（手机号注册时邮箱存在服务端），
+    此时以 uid 与昵称为准。</p>`;
+  } else {
+    $('#live').innerHTML = `<p class="note warn">无法读取当前登录态：${esc(s.liveError||'未知错误')}</p>`;
+  }
+
+  // ── 槽位 ──
+  const box = $('#slots');
+  if (!s.accounts.length) {
+    box.innerHTML = '<div class="empty">还没有账号槽位。在 Qoder 里登录一个账号，然后在下方保存为槽位。</div>';
+  } else {
+    box.innerHTML = s.accounts.map(a => {
+      const badges = [];
+      const busy = Boolean(s.switching);
+      if (a.isLive) badges.push('<span class="badge live">当前登录</span>');
+      badges.push(`<span class="badge">${esc(a.layout||'?')}</span>`);
+      if (a.incompatible) badges.push('<span class="badge err">布局不兼容</span>');
+      if (a.hasBak) badges.push(`<span class="badge${a.bak && a.bak.readable ? '' : ' warn'}">有上一代备份</span>`);
+      if (a.incomplete && a.incomplete.length) badges.push(`<span class="badge warn">未拷全 ${a.incomplete.length} 项</span>`);
+      const st = a.todaySignin;
+      if (st) badges.push(`<span class="badge ${st.status==='success'?'ok':st.status==='fail'?'err':''}">今日签到 ${esc(st.status)}</span>`);
+      const warn = a.incompatible
+        ? `<p class="note warn">该槽位是 ${esc(a.layout)} 快照，当前客户端是 ${esc(i.layout)}——客户端升级导致的历史遗留，
+           无法恢复。请在新客户端登录该账号后重新保存。</p>` : '';
+      const bakLine = a.hasBak
+        ? `<div class="slot-meta">上一代备份：${esc((a.bak && a.bak.identity) || '身份未知')}`
+          + `${a.bak && a.bak.savedAt ? ` · 保存于 ${esc(a.bak.savedAt)}` : ''}`
+          + `${a.bak && !a.bak.readable ? ' · ⚠ 解不开，可能不可回退' : ''}</div>` : '';
+      const incLine = (a.incomplete && a.incomplete.length)
+        ? `<div class="slot-meta" title="这些条目这次没拷全，恢复时只合并、不整目录替换（不会删掉实时数据）">未拷全：${a.incomplete.map(x=>`<code>${esc(x)}</code>`).join(' ')}</div>` : '';
+      const credsLine = a.creds
+        ? `凭证缓存 token过期=${esc(a.creds.expiresAt||'-')} 刷新令牌=${a.creds.hasRefresh?'有':'无'}`
+          + `${a.creds.updatedAt ? ` · 更新于 ${esc(a.creds.updatedAt)}` : ''}`
+        : '凭证缓存：无（save 时自动同步，签到时也会回退到直接解快照）';
+      return `<div class="slot ${a.isLive?'live':''} ${a.incompatible?'dead':''}">
+        <div class="slot-head">
+          <div>
+            <div class="slot-id">${esc(a.id)}${a.name?` · 备注「${esc(a.name)}」`:''}</div>
+            <div class="slot-name">${esc(a.identity||a.uidMasked)}</div>
+            <div class="slot-meta">uid ${esc(a.uidMasked)} · 保存于 ${esc(a.savedAt||'-')}${a.savedWhileRunning ? ' · 保存时 IDE 在运行' : ''}</div>
+            <div class="slot-meta">${esc(credsLine)}</div>
+            ${bakLine}${incLine}
+          </div>
+          <div class="row">${badges.join(' ')}</div>
+        </div>
+        ${warn}${!a.snapshotReadable && !a.incompatible ? `<p class="note warn">快照暂时解不开（${esc(a.snapshotError||'未知')}），上面显示的是注册表缓存身份。</p>`:''}
+        <div class="actions">
+          <button class="sm primary" data-act="switch" data-id="${esc(a.id)}"
+            ${a.isLive||a.incompatible||a.snapshotReadable===false||busy?'disabled':''}>${a.isLive?'已是当前账号':'切换到此账号'}</button>
+          <button class="sm" data-act="signin" data-id="${esc(a.id)}" ${busy?'disabled':''}>单独签到</button>
+          <button class="sm" data-act="rename" data-id="${esc(a.id)}">重命名</button>
+          <button class="sm" data-act="overwrite" data-id="${esc(a.id)}" ${busy?'disabled':''}>用当前登录覆盖</button>
+          ${a.hasBak?`<button class="sm" data-act="rollback" data-id="${esc(a.id)}" ${busy?'disabled':''}>回退到上一代</button>`:''}
+          <button class="sm danger" data-act="remove" data-id="${esc(a.id)}" ${busy?'disabled':''}>删除</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── 签到日志 ──
+  const log = s.signinLog || [];
+  $('#logwrap').innerHTML = log.length ? `<table><thead><tr>
+      <th>时间</th><th>槽位</th><th>结果</th><th>说明</th></tr></thead><tbody>`
+    + log.map(x => `<tr>
+      <td class="mono">${esc(new Date(x.time).toLocaleString('zh-CN',{hour12:false}))}</td>
+      <td class="mono">${esc(x.account)}</td>
+      <td><span class="badge ${x.status==='success'?'ok':x.status==='fail'?'err':''}">${esc(x.status)}</span></td>
+      <td>${esc(x.message||'')}${x.reward?` <b>+${esc(x.reward)}</b>`:''}</td></tr>`).join('')
+    + '</tbody></table>' : '<div class="empty">暂无记录</div>';
+
+  // ── 快照策略 ──
+  const t = s.config.tiers || {};
+  const TIER_LABEL = { core:'core 身份必需（不可关）', browser:'browser 浏览器状态', appdata:'appdata 应用数据' };
+  const TIER_HINT = {
+    core:'auth.v1.dat / Local State / machine-id / overlays —— 决定"登录的是谁"，必须交换',
+    browser:'Preferences / Network(cookies) / Local Storage / Session Storage —— 含 workspaceSessions 等视图状态，默认不换以保住对话可见性',
+    appdata:'qoder-data.v1.json(.ext) / Partitions / app-plugin-data —— 含按账号作用域投影的 agent 配置',
+  };
+  $('#tiers').innerHTML = ['core','browser','appdata'].map(k =>
+    `<label title="${esc(TIER_HINT[k]||'')}"><input type="checkbox" data-tier="${k}" ${t[k]?'checked':''} ${k==='core'||s.switching?'disabled':''}>
+      <span>${esc(TIER_LABEL[k])}</span></label>`).join('');
+  // 切换进行中，头部与保存区的写操作一并置灰
+  $('#btn-save').disabled = Boolean(s.switching);
+  $('#btn-signin-all').disabled = Boolean(s.switching);
+  // 自动退出阈值回填：正在输入时不要覆盖掉用户刚敲的值（20s 自刷新会打回来）
+  const wdInput = $('#wd-sec');
+  if (document.activeElement !== wdInput) {
+    wdInput.value = (s.watchdog && typeof s.watchdog.sec === 'number') ? s.watchdog.sec : 180;
+  }
+  wdInput.disabled = Boolean(s.switching);
+  $('#wl-note').innerHTML = `将交换 <b>${s.whitelist.length}</b> 项：${s.whitelist.map(x=>`<code>${esc(x)}</code>`).join(' ')||'(无)'}<br>
+    禁交换硬红线 <b>${s.neverSwap}</b> 条，含 <code>main.sqlite</code>（对话历史）。<br>
+    <b>browser 档默认关闭是刻意的</b>：<code>Local Storage/leveldb</code> 里存的是
+    <code>workspaceSessions</code> / <code>workspaceLayout</code> 这类<b>视图状态</b>，不是身份。
+    随账号一起交换会把目标账号上次的视图状态盖上来，表现就是"切号后看不到原对话"。
+    身份只由 <code>auth.v1.dat</code> + <code>Local State</code> 决定，所以默认只换这些，
+    以最大化"切号后继续之前的对话"。若你更想要彻底的账号隔离，再打开 browser 档。`;
+}
+
+async function refresh() {
+  try {
+    const r = await api('/api/status');
+    if (!r.ok) throw new Error(r.error || '读取失败');
+    render(r.status);
+  } catch (e) {
+    $('#envline').innerHTML = `<span style="color:var(--err)">读取状态失败：${esc(e.message)}</span>`;
+  }
+}
+
+// ── 会话可见性：切换账号前后各看一次，用数字判断对话是否还在 ──
+// 基线存 sessionStorage：切换会重启 IDE，页面若被重新加载，仍能拿切换前的数字做对比。
+let SESS_BEFORE = (() => {
+  try { const raw = sessionStorage.getItem('qam_sess_before'); return raw ? JSON.parse(raw) : null; }
+  catch { return null; }
+})();
+function rememberBaseline(n) {
+  SESS_BEFORE = n;
+  try { sessionStorage.setItem('qam_sess_before', JSON.stringify(n)); } catch { /* 隐私模式等，忽略 */ }
+}
+async function loadSessions(mark) {
+  try {
+    const r = await api('/api/sessions');
+    if (!r.ok) throw new Error(r.error || '读取失败');
+    const v = r.sessions;
+    if (!v.available) {
+      $('#sesswrap').innerHTML = `<div class="empty">不可用：${esc(v.reason||'未知原因')}</div>`;
+      $('#sess-note').textContent = '';
+      return;
+    }
+    if (mark === 'before') rememberBaseline(v.totals.sessions);
+    const scoped = v.accountScoped || [];
+    const cols = v.sessionColumns || 0;
+    const delta = (SESS_BEFORE !== null && mark !== 'before')
+      ? (() => { const d = v.totals.sessions - SESS_BEFORE;
+          return d === 0 ? '<span class="badge ok">与切换前一致</span>'
+            : `<span class="badge err">${d>0?'+':''}${d} 条变化（基线 ${SESS_BEFORE}）</span>`; })()
+      : '';
+    $('#sesswrap').innerHTML = `
+      <dl class="kv">
+        <dt>会话总数</dt><dd><b>${v.totals.sessions}</b> 条（未删除，其中已归档 ${v.totals.archived}）${delta?' '+delta:''}</dd>
+        <dt>消息条数</dt><dd>${v.totals.messages ?? '-'}</dd>
+        <dt>时间跨度</dt><dd>${esc(v.totals.firstAt||'-')} ~ ${esc(v.totals.lastAt||'-')}</dd>
+        <dt>账号分域列</dt><dd>${scoped.length
+          ? `<span class="badge err">${esc(scoped.join(', '))}</span> 存在账号分域`
+          : `<span class="badge ok">无</span> chat_sessions 共 ${cols} 列，无任何账号语义列`}</dd>
+      </dl>
+      <table style="margin-top:12px"><thead><tr>
+        <th>工作区</th><th>路径</th><th>会话</th><th>最近活动</th></tr></thead><tbody>
+      ${v.workspaces.map(w => `<tr>
+        <td>${esc(w.name)}${w.archived?' <span class="badge">归档</span>':''}${w.deleted?' <span class="badge err">已删</span>':''}</td>
+        <td class="mono">${esc((w.roots||[]).join(' | ')||'-')}</td>
+        <td><b>${w.sessions}</b></td>
+        <td class="mono">${esc(w.lastActivity||'-')}</td></tr>`).join('')}
+      </tbody></table>`;
+    $('#sess-note').innerHTML = scoped.length
+      ? '检测到账号分域列，会话可能被按账号过滤——请把此结果反馈以便精准处理。'
+      : '本地库层面<b>不存在按账号隔离会话的机制</b>（无账号列、列表 SQL 无账号过滤）。'
+        + '因此只要 <code>main.sqlite</code> 与 leveldb 视图状态都不参与交换，切号后原对话应照常可见可续。<br>'
+        + '<b>验证方法</b>：切换前点「重新检测」记下会话总数 → 切换账号 → 回来再点一次。'
+        + '数字不变即数据层完好；若此时 IDE 里看不到会话，说明过滤发生在视图层，可据此精准定位。';
+  } catch (e) {
+    $('#sesswrap').innerHTML = `<div class="empty">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function run(label, fn) {
+  if (BUSY) { toast('有操作正在进行中', 'warn'); return; }
+  BUSY = true;
+  const btns = [...document.querySelectorAll('button')];
+  // 记住每个按钮【原本】是否禁用：当前账号的「已是当前账号」、core 档之类本来就是禁用的，
+  // 旧写法一律解禁，于是一次操作之后"已是当前账号"按钮变成可点，用户会以为能切到自己。
+  const wasDisabled = new Map(btns.map(b => [b, b.disabled]));
+  btns.forEach(b => b.disabled = true);
+  toast(label + '…');
+  try { await fn(); }
+  catch (e) { toast(label + '失败：' + e.message, 'err'); }
+  finally {
+    BUSY = false;
+    btns.forEach(b => { b.disabled = wasDisabled.get(b) === true; });
+    await refresh();   // 重渲染槽位卡片，按最新状态重设禁用关系
+  }
+}
+
+// 切换进度轮询：服务活着时页面能全程显示；服务被 Qoder 回收则靠超时/失败标记收尾
+function watchSwitch() {
+  $('#switch-panel').style.display = '';
+  $('#switch-panel').dataset.watching = '1';
+  clearInterval(SWITCH_POLL);
+  let misses = 0, ticks = 0;
+  const MAX_TICKS = 200;           // 约 3 分钟：超过就认定拿不到结果，停止轮询并提示
+  SWITCH_POLL = setInterval(async () => {
+    ticks++;
+    try {
+      const r = await api('/api/switch-log');
+      const text = (r && r.text) || '';
+      if (r.ok && text) $('#switch-log').textContent = text;
+      misses = 0;
+      const s = await api('/api/status');
+      if (s.ok) render(s.status);
+      const done = /切换完成/.test(text);
+      const failed = /(^|\n)错误[:：]/.test(text) || /已中止/.test(text);
+      if (done || failed || ticks > MAX_TICKS) {
+        clearInterval(SWITCH_POLL);
+        delete $('#switch-panel').dataset.watching;
+        $('#banner').className = 'banner';
+        if (done) toast('切换完成，Qoder 已重启', 'ok');
+        else if (failed) toast('切换未成功，详见「切换进度」日志', 'err');
+        else toast('超过 3 分钟没看到切换结果。服务可能随 Qoder 一起被回收了——数据都在磁盘上，'
+          + '重新打开 Qoder 后再跑 /account-console 即可确认。', 'warn');
+        loadSessions();   // 自动做一次切换前后的会话可见性对比
+      }
+    } catch {
+      // 服务失去响应（多半是随 Qoder 被作业对象回收），连续 40 次后放弃
+      if (++misses > 40) {
+        clearInterval(SWITCH_POLL);
+        delete $('#switch-panel').dataset.watching;
+        toast('无法再连到控制台服务。重新打开 Qoder 后跑 /account-console 即可继续。', 'warn');
+      }
+    }
+  }, 900);
+}
+
+// ── 事件绑定 ──
+$('#btn-refresh').onclick = () => refresh();
+$('#btn-sessions').onclick = async () => { await loadSessions(); toast('已重新检测会话可见性', 'ok'); };
+$('#btn-sess-baseline').onclick = async () => {
+  await loadSessions('before');
+  toast(SESS_BEFORE !== null ? `已把会话总数 ${SESS_BEFORE} 记为切换前基线` : '基线记录失败', 'ok');
+};
+$('#btn-wd').onclick = () => run('保存自动退出设置', async () => {
+  const sec = Number($('#wd-sec').value);
+  if (!Number.isFinite(sec) || sec < 0 || sec > 86400) throw new Error('需要 0~86400 之间的秒数（0 = 常驻）');
+  const r = await api('/api/config', { method:'POST', body: JSON.stringify({ exitAfterNoQoderSec: sec }) });
+  if (!r.ok) throw new Error(r.error || '保存失败');
+  toast(sec === 0 ? '已改为常驻（需要手动 --stop）' : `已设定：IDE 退出 ${sec}s 后服务自动结束`, 'ok');
+});
+$('#btn-doctor').onclick = () => run('环境自检', async () => {
+  const r = await api('/api/doctor');
+  $('#switch-panel').style.display = '';
+  $('#switch-log').textContent = r.text || r.error || '(无输出)';
+  if (!r.ok) throw new Error(r.error || '自检失败');
+});
+
+$('#btn-signin-all').onclick = () => run('全员签到', async () => {
+  const r = await api('/api/signin', { method:'POST', body:'{}' });
+  if (!r.ok) throw new Error(r.error || r.stderr || '签到失败');
+  const ev = r.json?.events || [];
+  const bad = ev.filter(x => x.status === 'fail');
+  toast(bad.length ? `签到完成，${bad.length} 个失败` : `签到完成：${ev.map(x=>x.status).join('/')}`, bad.length ? 'warn' : 'ok');
+  if (r.text) { $('#switch-panel').style.display=''; $('#switch-log').textContent = r.text; }
+});
+
+$('#btn-save').onclick = () => {
+  const id = $('#new-id').value.trim();
+  const name = $('#new-name').value.trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) { toast('槽位 id 只能是字母/数字/_/-，≤64 字符', 'err'); return; }
+  run('保存槽位', async () => {
+    const r = await api('/api/save', { method:'POST', body: JSON.stringify({ id, name }) });
+    if (!r.ok) throw new Error(r.error || r.text || '保存失败');
+    const w = r.json?.warnings?.length || 0;
+    toast(w ? `已保存 ${id}（${w} 项因占用跳过，身份文件完整）` : `已保存 ${id}`, w ? 'warn' : 'ok');
+    $('#new-id').value = ''; $('#new-name').value = '';
+  });
+};
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  const id = b.dataset.id, act = b.dataset.act;
+
+  if (act === 'switch') {
+    const a = STATUS.accounts.find(x => x.id === id) || {};
+    const cur = STATUS.live ? `${STATUS.live.label}（uid ${STATUS.live.uidMasked}）` : '未知账号';
+    const ok = await confirmDialog({
+      title: '切换账号',
+      body: `将从 <b>${esc(cur)}</b> 切换到 <b>${esc(a.identity||id)}</b>（uid ${esc(a.uidMasked)}${a.name?`，备注「${esc(a.name)}」`:''}）。`,
+      okText: '确认切换并重启 Qoder',
+      extra: `<label class="checkline"><input type="checkbox" id="m-ack">
+        <span class="ack-text">我知道这会<b>关闭并重启 Qoder IDE</b>，未保存的编辑内容会丢失；
+        对话历史保留（存于 <code>main.sqlite</code>，不参与交换）。当前登录态会先自动备份回它自己的槽位。
+        <span class="ack-hint" data-pending="☐ 勾选这条之后，下面的「确认切换并重启 Qoder」才会亮起"
+          data-done="✓ 已确认，下面的按钮可以点了">☐ 勾选这条之后，下面的「确认切换并重启 Qoder」才会亮起</span></span></label>`,
+    });
+    if (!ok) return;
+    BUSY = true;
+    $('#switch-panel').style.display = '';
+    $('#switch-panel').dataset.watching = '1';
+    $('#switch-log').textContent = '正在启动切换进程…';
+    $('#banner').textContent = '切换进行中：Qoder 即将关闭并重启，请勿关闭本页。';
+    $('#banner').className = 'banner show';
+    try {
+      const r = await api('/api/switch', { method:'POST', body: JSON.stringify({ target:id, confirm:true }) });
+      if (!r.ok) {
+        delete $('#switch-panel').dataset.watching;
+        $('#banner').className='banner';
+        toast(r.error||'切换启动失败','err'); BUSY=false; return;
+      }
+      toast('切换已启动，Qoder 即将重启', 'warn');
+      watchSwitch();
+    } catch (err) {
+      delete $('#switch-panel').dataset.watching;
+      $('#banner').className='banner';
+      toast('切换启动失败：'+err.message,'err');
+    }
+    BUSY = false;
+    return;
+  }
+
+  if (act === 'signin') {
+    run(`签到 ${id}`, async () => {
+      const r = await api('/api/signin', { method:'POST', body: JSON.stringify({ ids:[id] }) });
+      if (!r.ok) throw new Error(r.error || r.text || '签到失败');
+      const ev = (r.json?.events||[])[0];
+      toast(ev ? `${id}: ${ev.status} — ${ev.message}` : '签到完成', ev?.status==='fail'?'err':'ok');
+      if (r.text) { $('#switch-panel').style.display=''; $('#switch-log').textContent = r.text; }
+    });
+    return;
+  }
+
+  if (act === 'rename') {
+    const a = STATUS.accounts.find(x => x.id === id) || {};
+    const nn = prompt(`给槽位 ${id} 设备注名（可留空；卡片主标题始终显示真实身份）：`, a.name || '');
+    if (nn === null) return;
+    run('重命名', async () => {
+      const r = await api('/api/rename', { method:'POST', body: JSON.stringify({ id, name: nn.trim() }) });
+      if (!r.ok) throw new Error(r.error||'重命名失败');
+      toast('已重命名', 'ok');
+    });
+    return;
+  }
+
+  if (act === 'overwrite') {
+    const ok = await confirmDialog({
+      title:'用当前登录覆盖槽位',
+      body:`将把<b>当前 IDE 登录态</b>重新快照进槽位 <b>${esc(id)}</b>，覆盖其中原有内容（上一代会留作 <code>.bak</code>）。`,
+      okText:'覆盖',
+      extra:`<label class="checkline"><input type="checkbox" id="m-ack"><span class="ack-text">我确认当前 IDE 里登录的就是我想存进 <b>${esc(id)}</b> 的那个账号。
+        <span class="ack-hint" data-pending="勾选后「覆盖」按钮才会亮起" data-done="✓ 已确认，可以点「覆盖」了">勾选后「覆盖」按钮才会亮起</span></span></label>`,
+    });
+    if (!ok) return;
+    run('覆盖槽位', async () => {
+      const r = await api('/api/save', { method:'POST', body: JSON.stringify({ id }) });
+      if (!r.ok) throw new Error(r.error || r.text || '保存失败');
+      toast(`已覆盖 ${id}`, 'ok');
+    });
+    return;
+  }
+
+  if (act === 'rollback') {
+    const a = STATUS.accounts.find(x => x.id === id) || {};
+    const ok = await confirmDialog({
+      title:'回退到上一代快照',
+      body:`槽位 <b>${esc(id)}</b> 会把<b>当前主快照</b>与<b>上一代备份</b>互换。<br>`
+        + `上一代：${esc((a.bak && a.bak.identity) || '身份未知')}`
+        + `${a.bak && a.bak.savedAt ? ` · 保存于 ${esc(a.bak.savedAt)}` : ''}<br>`
+        + `当代：${esc(a.identity || id)}<br>`
+        + `<span style="color:var(--muted)">互换是对称操作：再点一次就换回来。只动本地快照，不碰 IDE 当前登录态。</span>`,
+      okText:'互换快照',
+      extra:`<div class="checkline"><input type="checkbox" id="m-ack"><span>我确认要把该槽位的内容换成上一代。</span></div>`,
+    });
+    if (!ok) return;
+    run('回退快照', async () => {
+      const r = await api('/api/rollback', { method:'POST', body: JSON.stringify({ id, confirm:true }) });
+      if (!r.ok) throw new Error(r.error || '回退失败');
+      toast(r.text || '已回退', 'ok');
+    });
+    return;
+  }
+
+  if (act === 'remove') {
+    const ok = await confirmDialog({
+      title:'删除槽位',
+      body:`将永久删除槽位 <b>${esc(id)}</b> 及其快照、备份与凭证缓存。<br><b>此操作不可撤销。</b>`,
+      okText:'永久删除',
+      extra:`<label class="checkline"><input type="checkbox" id="m-ack"><span class="ack-text">我确认要删除，且知道快照删除后无法找回该账号的登录态。
+        <span class="ack-hint" data-pending="勾选后「永久删除」按钮才会亮起" data-done="✓ 已确认，可以点「永久删除」了">勾选后「永久删除」按钮才会亮起</span></span></label>`,
+    });
+    if (!ok) return;
+    run('删除槽位', async () => {
+      const r = await api('/api/remove', { method:'POST', body: JSON.stringify({ id }) });
+      if (!r.ok) throw new Error(r.error||'删除失败');
+      toast(`已删除 ${id}`, 'ok');
+    });
+  }
+});
+
+document.addEventListener('change', (e) => {
+  const k = e.target.dataset?.tier;
+  if (!k) return;
+  const tiers = { ...STATUS.config.tiers, [k]: e.target.checked };
+  api('/api/config', { method:'POST', body: JSON.stringify({ tiers }) })
+    .then(r => { toast(r.ok ? `已更新快照档位（${k}=${e.target.checked}）` : r.error, r.ok?'ok':'err'); return refresh(); });
+});
+
+refresh();
+// 首次加载记基线；若本次会话已有基线（比如切完账号页面被重新加载），就拿它做对比，
+// 不要用切换后的数字把基线覆盖掉。
+loadSessions(SESS_BEFORE === null ? 'before' : '');
+// 轻量自刷新：状态会随签到/切换变化
+setInterval(() => { if (!BUSY) refresh(); }, 20000);
+// 倒计时本地每秒走一格：服务端 15s 才探一次，只靠它会让倒计时跳着走
+setInterval(() => {
+  if (!WD.active) return;
+  WD.remaining = Math.max(0, WD.remaining - 1);
+  if (STATUS?.switching || $('#switch-panel').dataset.watching) return;
+  if (WD.remaining > 0) {
+    banner(`Qoder 未运行，控制台服务将在约 ${WD.remaining}s 后自动退出以释放内存。`
+      + '槽位与登录数据都已落盘，重新打开 Qoder 再跑 /account-console 即可。');
+  } else {
+    banner('服务已自动退出（Qoder 一直没回来）。本页现在点不动了——重新打开 Qoder 后跑 /account-console 即可，槽位原样可用。');
+  }
+}, 1000);
+</script>
+</body>
+</html>
