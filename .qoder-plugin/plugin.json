@@ -1,9 +1,9 @@
 {
   "name": "qoder-account-manager",
   "displayName": "Qoder 多账号管理",
-  "version": "0.2.0",
-  "description": "Local multi-account manager for Qoder CN IDE: snapshot-based account switching that preserves chat history, a local browser console UI, daily sign-in for all saved accounts, and account status inspection. Supports the electron-root layout (0.4.3+, auth.v1.dat) and the legacy icube layout.",
-  "descriptionZh": "Qoder CN IDE 本地多账号管理：快照式账号切换（保留对话历史）、本地浏览器控制台 UI、全部已保存账号每日双活动签到、账号状态与环境自检。支持 0.4.3+ 的 electron-root 布局（auth.v1.dat）与旧版 icube 布局。",
+  "version": "0.3.0",
+  "description": "Local multi-account manager for Qoder CN IDE: snapshot-based account switching that preserves chat history, a local browser console UI, daily sign-in for all saved accounts, per-account credits breakdown with expiry dates, and account status inspection. Supports the electron-root layout (0.4.3+, auth.v1.dat) and the legacy icube layout.",
+  "descriptionZh": "Qoder CN IDE 本地多账号管理：快照式账号切换（保留对话历史）、本地浏览器控制台 UI、全部已保存账号每日双活动签到、每个账号的 credits 额度分段与到期日、账号状态与环境自检。支持 0.4.3+ 的 electron-root 布局（auth.v1.dat）与旧版 icube 布局。",
   "author": {
     "name": "CyrilPeng"
   },
