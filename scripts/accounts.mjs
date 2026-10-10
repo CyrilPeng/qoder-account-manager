@@ -8,16 +8,18 @@
 //   node --no-warnings accounts.mjs rollback <id> --yes [--json]  把上一代 .bak 换回主槽位
 //   node --no-warnings accounts.mjs doctor [--json]    环境自检（数据目录/布局/exe）
 //   node --no-warnings accounts.mjs sessions [--json]  会话可见性诊断（切号前后对比用）
+//   node --no-warnings accounts.mjs credits [id...] [--refresh] [--json]  额度分段与到期日
 //
 // --json 会额外输出一行 QAM_JSON:<json>，供本地控制台服务可靠解析（不靠猜 stdout）。
-// 红线: token 全程不输出；sessions 只读计数与元信息，不读对话正文。
+// 红线: token 全程不输出；sessions 只读计数与元信息，不读对话正文；
+//       credits 只做两个只读 GET（用量 + 套餐），不刷新令牌，也不把令牌写进任何输出或缓存文件。
 import fs from 'node:fs';
 import path from 'node:path';
 import {
   ensureDirs, loadRegistry, saveRegistry, findAccount, listSnapshots, isValidSlotId,
   snapSlotDir, snapMetaFile, snapMetaBakFile, backupSnapshot, rollbackSnapshot,
   scanLogin, qoderRunning, killQoder, findQoderExe, maskUid, todayStr, detectLayout,
-  getDataDir, maskEmail, MGR_DIR,
+  getDataDir, maskEmail, MGR_DIR, collectCredits, CREDITS_TTL_MS,
 } from './qoder_lib.mjs';
 import { collectStatus, renderStatusText, identityOf, maskPhone, sessionVisibility, renderSessionsText } from './status.mjs';
 
@@ -33,7 +35,9 @@ function usage() {
   accounts.mjs rollback <id> --yes [--json]
                                           用上一代 .bak 回退槽位（覆盖保存后想找回旧快照时用）
   accounts.mjs doctor [--json]            环境自检
-  accounts.mjs sessions [--json]          会话可见性诊断（切换账号前后各跑一次对比）`);
+  accounts.mjs sessions [--json]          会话可见性诊断（切换账号前后各跑一次对比）
+  accounts.mjs credits [id...] [--refresh] [--json]
+                                          各账号 credits 额度分段与到期日（只读，5 分钟内走缓存）`);
 }
 
 /** 槽位 id 是唯一会拼进删除/覆盖路径的用户输入，入口处一律校验 */
@@ -53,6 +57,164 @@ function emitJson(obj) {
 function fmtTime(ms) {
   if (!ms) return '-';
   return new Date(ms).toLocaleString('zh-CN', { hour12: false });
+}
+
+function fmtDay(ms) {
+  if (!ms) return '未提供';
+  return new Date(ms).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
+function daysLeft(ms) {
+  if (!ms) return null;
+  return Math.ceil((ms - Date.now()) / 86_400_000);
+}
+
+/** 20 格用量条（CLI 版，与控制台的分段条同口径） */
+function textBar(percentage, width = 20) {
+  const p = Math.max(0, Math.min(100, Number(percentage) || 0));
+  const filled = Math.round((p / 100) * width);
+  return `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${String(p.toFixed(1))}%`;
+}
+
+/** 中文/全角按 2 列算，否则 padEnd 按字符数补齐会把表格拉歪 */
+function padDisplay(s, width) {
+  const str = String(s ?? '');
+  let w = 0;
+  for (const ch of str) w += /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]/.test(ch) ? 2 : 1;
+  return str + ' '.repeat(Math.max(0, width - w));
+}
+
+function expiryNote(seg, daily) {
+  if (seg.expirySource === 'rolling') {
+    return daily?.validityDays ? `每日刷新 · 领取后 ${daily.validityDays} 天到期` : '每日刷新 · 领取后按活动天数到期';
+  }
+  if (seg.expirySource === 'unknown') return '到期由后台决定，接口未提供';
+  const d = daysLeft(seg.expiresAtMs);
+  if (!seg.expiresAtMs) return '无到期信息';
+  if (d < 0) return `到期 ${fmtDay(seg.expiresAtMs)}（已过期 ${-d} 天）`;
+  if (d === 0) return `到期 ${fmtDay(seg.expiresAtMs)}（今天）`;
+  const src = seg.expirySource === 'period' ? '随套餐周期' : '自身';
+  return `到期 ${fmtDay(seg.expiresAtMs)}（${d} 天后 · ${src}）`;
+}
+
+/** 每日赠送活动的原文案（服务端给的，不在本地重写） */
+function dailyNoteLine(rec) {
+  const d = rec.daily;
+  if (!d) return null;
+  const bits = [];
+  if (d.title) bits.push(d.title);
+  if (d.description) bits.push(d.description);
+  bits.push(d.claimedToday ? '今日已领' : '今日未领');
+  return `  每日赠送：${bits.join(' · ')}`;
+}
+
+function creditsStatusNote(rec, reg) {
+  const bits = [];
+  if (rec.deferredBy === 'switching') bits.push('切换进行中，只给缓存');
+  if (rec.isLive) bits.push('当前登录');
+  if (rec.credsSource) bits.push(`凭证=${rec.credsSource}`);
+  if (rec.fromCache) {
+    const ageMin = Math.max(0, Math.round((Date.now() - Number(rec.fetchedAtMs || 0)) / 60000));
+    bits.push(`缓存 ${ageMin} 分钟前`);
+  }
+  if (rec.planTier) bits.push(`套餐 ${rec.planTier}`);
+  return bits.join(' · ');
+}
+
+/** 到期分批条：一格一批的字符宽度 = 该批剩余额度占比，字符按紧迫度分档 */
+const TONE_CHAR = { urgent: '█', soon: '▓', mid: '▒', far: '░', none: '·', expired: '✕', unknown: '?' };
+
+function fmtNum(n) {
+  return Math.round(Number(n) || 0).toLocaleString('en-US');
+}
+
+function batchBar(batches, width = 28) {
+  const total = batches.reduce((t, b) => t + b.credits, 0);
+  if (!total) return '─'.repeat(width);
+  const cells = batches.map((b) => Math.max(1, Math.round((b.credits / total) * width)));
+  let sum = cells.reduce((a, b) => a + b, 0);
+  while (sum > width) {
+    const i = cells.indexOf(Math.max(...cells));
+    cells[i]--; sum--;
+  }
+  return batches.map((b, i) => (TONE_CHAR[b.tone] || '░').repeat(cells[i])).join('');
+}
+
+function batchDayNote(b) {
+  if (!b.expiresAtMs) return '到期未定';
+  return b.daysLeft < 0 ? `已过期 ${-b.daysLeft} 天`
+    : b.daysLeft === 0 ? '今天到期' : `${b.daysLeft} 天后`;
+}
+
+/** 到期分批的文本块：条 + 每批一行（这是"什么时候没"的主答案） */
+function renderBatches(rec, indent = '  ') {
+  const bs = rec.batches || [];
+  if (!bs.length) return [`${indent}（当前没有可用余额，全部额度已用尽或已过期）`];
+  const lines = [`${indent}按到期分批 ${batchBar(bs)}  ${bs.length} 批 · 共 ${fmtNum(rec.summary?.byExpiry)}`];
+  for (const b of bs) {
+    const when = b.expiresAtMs
+      ? `${fmtDay(b.expiresAtMs).replace(/\//g, '-').slice(5)} 到期`
+      : '到期未知';
+    lines.push(`${indent}  ${(TONE_CHAR[b.tone] || '░')} ${when} `
+      + `${padDisplay(fmtNum(b.credits), 8).trimEnd()}（${batchDayNote(b)}）← ${b.sources.join(' + ')}`
+      + `${b.note ? ` [${b.note}]` : ''}`);
+  }
+  return lines;
+}
+
+/** credits 结果的文本渲染；控制台走同一份数据结构，避免两处各算一遍 */
+function renderCreditsText(accounts, reg) {
+  const lines = [];
+  for (const [id, rec] of Object.entries(accounts)) {
+    const a = findAccount(reg, id);
+    const label = [a?.name || '', rec.uidMasked || ''].filter(Boolean).join(' · ');
+    lines.push(`${id}${label ? `  ${label}` : ''}${creditsStatusNote(rec, reg) ? `  [${creditsStatusNote(rec, reg)}]` : ''}`);
+    if (!rec.ok) {
+      lines.push(`  ! ${rec.error || '获取失败'}（kind=${rec.kind}）`);
+      if (rec.data && rec.data.segments) {
+        lines.push('  ↑ 下面是上一次成功时的数据');
+        lines.push(...renderBatches({ batches: rec.data.batches, summary: rec.data.summary }, '    '));
+        for (const s of rec.data.segments) {
+          lines.push(`    ▸ ${padDisplay(s.label, 22)} ${textBar(s.percentage)} ${Math.round(s.used)}/${Math.round(s.total)} 剩 ${Math.round(s.remaining)}  ${expiryNote(s, rec.data.daily)}`);
+        }
+      }
+      lines.push('');
+      continue;
+    }
+    if (rec.kind === 'enterprise') {
+      lines.push(`  ${rec.note || '企业版额度由组织后台管理'}`);
+      if (rec.detailUrl) lines.push(`  详情页：${rec.detailUrl}`);
+      lines.push('');
+      continue;
+    }
+    const pd = daysLeft(rec.periodEndMs);
+    lines.push(`  额度周期：${fmtDay(rec.periodStartMs)} ~ ${fmtDay(rec.periodEndMs)}`
+      + (pd !== null ? `（剩 ${pd} 天）` : ''));
+    const dl = dailyNoteLine(rec);
+    if (dl) lines.push(dl);
+    lines.push(...renderBatches(rec));
+    for (const s of rec.segments || []) {
+      const state = s.remaining <= 0 ? '已用尽' : (s.available ? '可用' : '不可用');
+      lines.push(`    ▸ ${padDisplay(s.label, 22)} ${textBar(s.percentage)} `
+        + `${String(Math.round(s.used)).padStart(5)}/${String(Math.round(s.total)).padStart(5)} `
+        + `剩 ${String(Math.round(s.remaining)).padStart(5)}  ${expiryNote(s, rec.daily)} · ${state}`);
+    }
+    const sm = rec.summary || {};
+    const nd = daysLeft(sm.nearestExpiryMs);
+    lines.push(`  合计：剩 ${fmtNum(sm.remaining)} / ${fmtNum(sm.total)} credits`
+      + `（已用 ${sm.percentage}%${sm.serverPercentage !== null ? `，服务端口径 ${sm.serverPercentage}%` : ''}）`
+      + `· ${sm.segmentCount || 0} 池 / ${sm.batchCount || 0} 批 `
+      + `· 最近到期 ${fmtDay(sm.nearestExpiryMs)}`
+      + (nd !== null ? `（${nd} 天后）` : ''));
+    if (sm.expiredTotal) lines.push(`  ⚠ 另有 ${fmtNum(sm.expiredTotal)} credits 挂在已过期批次上，不计入可用合计`);
+    if (sm.unknownExpiryTotal) lines.push(`  ⓘ 其中 ${fmtNum(sm.unknownExpiryTotal)} 是每日赠送但本地没有领取记录，到期日只能待定（在 IDE 里领的不会被本工具记到）`);
+    if (sm.blockedRemaining) lines.push(`  ⚠ 另有 ${fmtNum(sm.blockedRemaining)} credits 服务端标记为不可用，不计入可用合计`);
+    if (rec.isQuotaExceeded) lines.push('  ⚠ 服务端标记额度已用尽（isQuotaExceeded）');
+    if (rec.note) lines.push(`  提示：${rec.note}`);
+    lines.push('');
+  }
+  if (!lines.length) lines.push('（没有已保存的槽位）');
+  return lines.join('\n');
 }
 
 async function main() {
@@ -125,6 +287,23 @@ async function main() {
     const v = sessionVisibility();
     console.log(renderSessionsText(v));
     emitJson({ ok: true, cmd, sessions: v });
+    return;
+  }
+
+  // ── credits：各账号额度与到期（只读 GET，不动令牌）──
+  if (cmd === 'credits') {
+    const force = args.includes('--refresh');
+    const ids = args.slice(1).filter((a) => !a.startsWith('--'));
+    for (const id of ids) requireId(id, cmd);
+    const reg = loadRegistry();
+    const r = await collectCredits({ ids: ids.length ? ids : undefined, force });
+    console.log('════ Credits · 额度与到期 ════\n');
+    console.log(renderCreditsText(r.accounts, reg));
+    const failed = Object.values(r.accounts).filter((x) => !x.ok).length;
+    console.log(`出网 ${r.requested} 次，命中缓存 ${r.cachedCount} 个`
+      + `（缓存 ${Math.round(CREDITS_TTL_MS / 60000)} 分钟内不重复请求，加 --refresh 强制刷新）`);
+    emitJson({ ok: failed === 0, cmd, credits: r.accounts, requested: r.requested, cachedCount: r.cachedCount });
+    if (failed) process.exitCode = 2;
     return;
   }
 

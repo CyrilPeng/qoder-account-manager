@@ -41,6 +41,7 @@ export const SNAP_DIR = path.join(MGR_DIR, 'snapshots');
 export const CREDS_DIR = path.join(MGR_DIR, 'creds');
 export const REGISTRY_FILE = path.join(MGR_DIR, 'accounts.json');
 export const SIGNIN_LOG_FILE = path.join(MGR_DIR, 'signin-log.json');
+export const CREDITS_FILE = path.join(MGR_DIR, 'credits.json');
 export const CONFIG_FILE = path.join(MGR_DIR, 'config.json');
 export const SWITCH_LOCK_FILE = path.join(MGR_DIR, 'switch.lock');
 
@@ -432,6 +433,40 @@ export function pickCredsSource({ cached, snap, savedAtMs, tokenTtlMs = 10 * 60 
   const snapLeft = Number(snap.expiresAtMs || 0) - now;
   if (cacheLeft < tokenTtlMs && snapLeft > cacheLeft) return 'snapshot';
   return 'cache';
+}
+
+/**
+ * 取某槽位可用的凭证：live（uid 匹配）>「缓存 / 快照解密」中更新的那个。
+ * 签到与 credits 查询共用这一条规则——两处各写一份迟早会漂移，而漂移的后果是
+ * 拿着已被服务端轮换掉的旧 refreshToken 去撞墙（permanent_auth 那个坑的成因）。
+ * @param {string} id 槽位 id
+ * @param {object|null} live scanLogin(实时数据目录) 的结果
+ * @returns {{creds?:object, source?:'ide-live'|'snapshot'|'cache', isLive?:boolean, error?:string}}
+ */
+export function obtainAccountCreds(id, live) {
+  assertSlotId(id);
+  const reg = loadRegistry();
+  const a = findAccount(reg, id);
+  // uid 判据同时看注册表与快照：注册表缺项时快照仍能认出「这就是当前账号」
+  let snap = null, snapError = null;
+  try { snap = scanLogin(snapSlotDir(id)); } catch (e) { snapError = String(e?.message || e); }
+  const slotUid = snap?.uid || a?.uid || '';
+  const isLive = Boolean(live && slotUid && slotUid === live.uid);
+  if (isLive) {
+    const c = credsFromLogin(live);
+    saveCreds(id, c); // IDE 侧刚刷新过的最新令牌，回写缓存供该账号变为非活跃时使用
+    return { creds: c, source: 'ide-live', isLive: true };
+  }
+  if (!snap) return { error: `快照凭证解密失败——${snapError || '槽位不可读'}` };
+  const cached = loadCreds(id);
+  const choice = pickCredsSource({ cached, snap, savedAtMs: readSnapMeta(id)?.savedAtMs || 0 });
+  if (choice === 'snapshot') {
+    const c = credsFromLogin(snap);
+    saveCreds(id, c);
+    return { creds: c, source: 'snapshot', isLive: false };
+  }
+  if (choice === 'cache') return { creds: cached, source: 'cache', isLive: false };
+  return { error: '既无可用凭证缓存，快照也解不出令牌' };
 }
 
 // ── 切换互斥锁 ────────────────────────────────────────────────────────────
@@ -1432,6 +1467,434 @@ export function learnDailyCampaignIds(campaigns) {
     if (!out.some((x) => x[0] === id)) out.push([id, name]);
   }
   return out;
+}
+
+// ── Credits / 配额 ────────────────────────────────────────────────────────
+// 取证来源：Qoder CN 0.4.3 app.asar 里 account.getQuotaUsage / account.getUserPlan 两个
+// 调用点及其响应校验函数（字段既有 camel 也有 snake，客户端校验就是双取，这里照做）。
+//   GET /sash/api/v2/me/usage
+//     displayMode='qoder'      → qoderUsage{ userType, usageType, totalUsagePercentage(0..1),
+//                                isQuotaExceeded, expiresAt(ms), upgradeUrl,
+//                                userQuota{total,used,remaining,percentage,unit},
+//                                addOnQuota{…同上 + detailUrl},
+//                                dedicatedResourcePackages[]{id,name,description,total,used,
+//                                  remaining,percentage,unit,expiresAt,available,status,
+//                                  displayLabels[{dimension,value,valueI18n{'zh-CN','en-US'}}]},
+//                                orgResourcePackage{total(cap),used,available} }
+//     displayMode='enterprise' → 只有 enterpriseUsage{openMode,detailUrl}，额度归组织后台，
+//                                本地拿不到数字，只能给详情页链接。
+//   GET /api/v2/user/plan      → {user_type, plan_tier_name, is_personal_version, is_paid_plan,
+//                                 is_highest_tier, start_date(ms), end_date(ms)}
+// 两个都是只读 GET：不动令牌、不触发轮换，所以「活跃账号只用不刷」那条策略天然满足。
+
+export const CREDITS_TTL_MS = 5 * 60 * 1000;
+export const QUOTA_USAGE_PATH = '/sash/api/v2/me/usage';
+export const USER_PLAN_PATH = '/api/v2/user/plan';
+
+function pickNum(o, keys) {
+  for (const k of keys) {
+    const v = o?.[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+  }
+  return null;
+}
+function pickStr(o, keys) {
+  for (const k of keys) {
+    const v = o?.[k];
+    if (typeof v === 'string' && v) return v;
+  }
+  return '';
+}
+
+function classifyResp(status, body, what) {
+  if (status === 0) return { ok: false, kind: 'network', error: `${what} 请求发不出去（网络不可达）` };
+  if (status === 401 || status === 403) {
+    return { ok: false, kind: 'auth', error: `${what} 被拒（HTTP ${status}）：登录态已失效或令牌过期` };
+  }
+  if (status === 429) return { ok: false, kind: 'rate', error: `${what} 被限流（429），稍后再试` };
+  if (status < 200 || status >= 300) return { ok: false, kind: 'server', error: `${what} HTTP ${status}` };
+  if (!body || typeof body !== 'object') return { ok: false, kind: 'invalid', error: `${what} 响应不是合法 JSON` };
+  return { ok: true, body };
+}
+
+export async function fetchQuotaUsage(creds) {
+  const { status, body } = await httpJson(`${OPEN_API_BASE}${QUOTA_USAGE_PATH}`, { headers: apiHeaders(creds) });
+  return classifyResp(status, body, '用量');
+}
+
+export async function fetchUserPlan(creds) {
+  const { status, body } = await httpJson(`${OPEN_API_BASE}${USER_PLAN_PATH}`, { headers: apiHeaders(creds) });
+  return classifyResp(status, body, '套餐');
+}
+
+/** 专属包的名字优先取客户端展示用的中文标签，其次 name，最后回落到 id 前缀 */
+export function packageLabel(p) {
+  const labels = Array.isArray(p?.displayLabels) ? p.displayLabels : [];
+  const title = labels.find((l) => String(l?.dimension || '') === 'title');
+  const i18n = title?.valueI18n || title?.value_i18n || {};
+  return String(i18n['zh-CN'] || i18n['en-US'] || title?.value || p?.name
+    || (p?.id ? `专属包 ${String(p.id).slice(0, 8)}` : '专属包'));
+}
+
+/** 一段配额归一。服务端 percentage 见过 0..1 也见过 0..100，按量级还原成百分比。 */
+function quotaSeg(raw, { key, label, expiresAtMs, expirySource }) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const total = pickNum(raw, ['total', 'cap']) ?? 0;
+  const used = Math.max(0, pickNum(raw, ['used']) ?? 0);
+  const declared = pickNum(raw, ['remaining']);
+  const remaining = declared !== null ? Math.max(0, declared) : Math.max(0, total - used);
+  const pct = pickNum(raw, ['percentage']);
+  const percentage = pct === null
+    ? (total > 0 ? (used / total) * 100 : 0)
+    : (pct >= 0 && pct <= 1 ? pct * 100 : pct);
+  const available = typeof raw.available === 'boolean' ? raw.available : remaining > 0;
+  return {
+    key, label,
+    total: round2(total), used: round2(used), remaining: round2(remaining),
+    percentage: Math.round(percentage * 10) / 10,
+    unit: pickStr(raw, ['unit']) || 'credits',
+    expiresAtMs: expiresAtMs ?? null,
+    expirySource: expirySource || 'own',
+    status: pickStr(raw, ['status']),
+    available,
+    detailUrl: pickStr(raw, ['detailUrl', 'detail_url']),
+  };
+}
+
+function round2(n) { return Math.round(Number(n) * 100) / 100; }
+
+/** 到期紧迫度分档：越近越红，供 CLI 与页面共用同一套色阶/字符 */
+export function expiryTone(ms, now = nowMs()) {
+  if (!ms) return 'none';
+  const dl = Math.ceil((ms - now) / 86400000);
+  return dl < 0 ? 'expired' : dl <= 3 ? 'urgent' : dl <= 7 ? 'soon' : dl <= 21 ? 'mid' : 'far';
+}
+
+/**
+ * 每日赠送类额度的"账本"：接口只给 addOnQuota 的合计余额，不给逐笔到期，而真实规则是
+ * 「每日 10:00(UTC+8) 刷新，领取后 N 天有效」（N 来自活动的 benefit.validity.days）。
+ * 于是只能用本工具记下的领取事实还原逐笔到期：签到日志每条 success/already 都带当日积分与时刻。
+ * 在 IDE 里领走、工具没记到的那部分不假装知道——落到"到期未知"批次。
+ * @returns {Array<{date:string, amount:number, claimedAtMs:number, expiresAtMs:number|null}>}
+ */
+export function loadClaimLedger(id, { validityDays = null, now = nowMs() } = {}) {
+  if (!isValidSlotId(id)) return [];
+  const byDate = new Map();
+  for (const e of readSigninLog(200)) {
+    if (!e || (e.account !== id && e.name !== id)) continue;
+    const amount = Number(e.reward) || 0;
+    if (amount <= 0) continue;
+    if (!/^(success|already)$/.test(String(e.status || ''))) continue;
+    const date = String(e.date || '');
+    const claimedAtMs = Number(e.time) || 0;
+    const prev = byDate.get(date);
+    if (!prev || amount > prev.amount) byDate.set(date, { date, amount, claimedAtMs });
+  }
+  const days = Number(validityDays) > 0 ? Number(validityDays) : null;
+  return [...byDate.values()]
+    .map((r) => ({ ...r, expiresAtMs: days && r.claimedAtMs ? r.claimedAtMs + days * 86_400_000 : null }))
+    .filter((r) => !days || !r.expiresAtMs || r.expiresAtMs > now)
+    .sort((a, b) => (a.expiresAtMs ?? Number.MAX_SAFE_INTEGER) - (b.expiresAtMs ?? Number.MAX_SAFE_INTEGER));
+}
+
+/**
+ * 从 campaigns 响应里取"每日 Credits"活动的发放规则：金额、有效天数、当日领取窗口与官方文案。
+ * 文案用服务端原文，不在本地另写一套（"每日 10:00（UTC+8）刷新，领取后 30 天有效"）。
+ */
+export function creditGrantRule(campaigns) {
+  const list = Array.isArray(campaigns) ? campaigns : [];
+  const hits = list.filter((c) => String(c?.actionType || '').toUpperCase() === 'CLAIM_BENEFIT'
+    && String(c?.benefit?.kind || '').toUpperCase() === 'CREDITS');
+  if (!hits.length) return null;
+  const sec = (v) => { const n = Number(v) || 0; return n >= 1e12 ? n : n * 1000; };
+  const now = nowMs();
+  const rows = hits.map((c) => {
+    const texts = (Array.isArray(c?.placements) ? c.placements : [])
+      .map((p) => p?.content?.zh || p?.content?.en || {}).filter((t) => t && typeof t === 'object');
+    return {
+      campaignId: String(dig(c, ['campaignId', 'campaign_id']) || ''),
+      amount: Number(c?.benefit?.amount) || 0,
+      validityDays: Number(c?.benefit?.validity?.days) || null,
+      validityMode: String(c?.benefit?.validity?.mode || ''),
+      claimStatus: String(dig(c, ['claimStatus', 'claim_status']) || '').toUpperCase(),
+      windowStartMs: sec(c?.startAt),
+      windowEndMs: sec(c?.endAt),
+      title: (texts.find((t) => t.title) || {}).title || '',
+      description: (texts.find((t) => t.description) || {}).description || '',
+      detailUrl: (texts.find((t) => t.detailUrl) || {}).detailUrl || '',
+    };
+  });
+  return rows.find((r) => r.windowStartMs && r.windowEndMs && r.windowStartMs <= now && now <= r.windowEndMs)
+    || rows[0];
+}
+
+/**
+ * 把各额度池的**剩余额度按到期时间分批**——这才是"还剩多少、哪天没了"的直接答案：
+ * 同一到期时刻的若干池合成一批（一批 = 分段条上的一格），到期时刻不同的必然分开。
+ * 每日赠送类（`expirySource==='rolling'`）没有单一到期时刻，按账本逐笔拆、先到期先扣，
+ * 拆不完的余额归入"到期未知"批次，绝不硬套套餐周期。
+ * 已过期但仍挂余额的计到 expired（不进条、不计入可用合计）；标记不可用的计到 blocked。
+ */
+export function expiryBatches(segments, { now = nowMs(), ledger = [] } = {}) {
+  const map = new Map(), expired = [], blocked = [];
+  const push = (expiresAtMs, credits, source, note) => {
+    const amount = round2(Math.max(0, credits));
+    if (amount <= 0) return;
+    if (expiresAtMs && expiresAtMs <= now) { expired.push({ expiresAtMs, credits: amount, source }); return; }
+    const key = `${expiresAtMs || 'none'}|${note || ''}`;
+    const b = map.get(key) || { expiresAtMs: expiresAtMs || null, credits: 0, sources: [], note: note || '' };
+    b.credits = round2(b.credits + amount);
+    if (!b.sources.includes(source)) b.sources.push(source);
+    map.set(key, b);
+  };
+  for (const s of segments || []) {
+    if (!s || typeof s !== 'object') continue;
+    const credits = Math.max(0, Number(s.remaining) || 0);
+    if (credits <= 0) continue;                     // 用尽的池不占条上的一格
+    if (s.available === false) { blocked.push({ label: s.label, credits }); continue; }
+    if (s.expirySource === 'rolling' && (ledger || []).length) {
+      let left = credits;
+      for (const g of ledger) {
+        if (left <= 0) break;
+        const take = Math.min(left, g.amount);
+        push(g.expiresAtMs, take, s.label, g.date ? `领取于 ${g.date}` : '');
+        left = round2(left - take);
+      }
+      if (left > 0) push(null, left, s.label, '本地无领取记录，到期未知');
+      continue;
+    }
+    push(s.expiresAtMs, credits, s.label, '');
+  }
+  const batches = [...map.values()]
+    .map((b) => ({
+      ...b,
+      daysLeft: b.expiresAtMs ? Math.ceil((b.expiresAtMs - now) / 86400000) : null,
+      tone: b.expiresAtMs ? expiryTone(b.expiresAtMs, now) : 'unknown',
+    }))
+    .sort((x, y) => (x.expiresAtMs ?? Number.MAX_SAFE_INTEGER) - (y.expiresAtMs ?? Number.MAX_SAFE_INTEGER));
+  const total = round2(batches.reduce((t, b) => t + b.credits, 0));
+  for (const b of batches) b.share = total > 0 ? Math.round((b.credits / total) * 1000) / 10 : 0;
+  return {
+    batches, total,
+    expiredCount: expired.length,
+    expiredTotal: round2(expired.reduce((t, b) => t + b.credits, 0)),
+    blockedTotal: round2(blocked.reduce((t, b) => t + b.credits, 0)),
+    unknownTotal: round2(batches.filter((b) => !b.expiresAtMs).reduce((t, b) => t + b.credits, 0)),
+  };
+}
+
+/**
+ * 把 usage + plan 两份响应合成"分段 credits"模型：
+ * 套餐额度 / 加购额度 / 每个专属资源包各成一段，各自说清到期语义：套餐随周期固定到期，
+ * 加购/赠送是"每日刷新 + 领取后 N 天"的滚动到期（按账本逐笔拆），专属包用自带到期时刻。
+ * 汇总段给出合计与"最近到期"，UI 直接照着画分批条。
+ */
+export function normalizeCredits({ usage, plan, rule = null, ledger = [] } = {}) {
+  const top = usage && typeof usage === 'object' ? (usage.qoderUsage || usage.data?.qoderUsage || null) : null;
+  const ent = usage?.enterpriseUsage || usage?.data?.enterpriseUsage || null;
+  const planTier = pickStr(plan, ['plan_tier_name', 'planTierName', 'plan_name', 'planName']);
+  if (!top && ent) {
+    return {
+      ok: true, kind: 'enterprise', planTier, segments: [],
+      summary: { total: 0, used: 0, remaining: 0, percentage: 0, segmentCount: 0, nearestExpiryMs: null },
+      detailUrl: pickStr(ent, ['detailUrl', 'detail_url']),
+      note: '企业版额度由组织后台管理，客户端只给详情页链接，本地拿不到数字',
+    };
+  }
+  if (!top) return { ok: false, kind: 'invalid', error: '响应里没有 qoderUsage / enterpriseUsage 结构' };
+
+  const periodEndMs = pickNum(top, ['expiresAt', 'expires_at']) ?? pickNum(plan, ['end_date', 'endDate']) ?? null;
+  const periodStartMs = pickNum(plan, ['start_date', 'startDate']) ?? null;
+  const now = nowMs();
+  const segs = [];
+  const push = (s) => { if (s) segs.push(s); };
+
+  push(quotaSeg(top.userQuota || top.user_quota, {
+    key: 'userQuota', label: planTier ? `套餐额度 · ${planTier}` : '套餐额度',
+    expiresAtMs: periodEndMs, expirySource: 'period',
+  }));
+  const addOnRaw = top.addOnQuota || top.add_on_quota || {};
+  const addOnOwn = pickNum(addOnRaw, ['expiresAt', 'expires_at']);
+  push(quotaSeg(addOnRaw, {
+    key: 'addOnQuota', label: '加购/赠送额度',
+    // 服务端没给这一池自己的到期时刻时，它是"每日刷新 + 领取后 N 天"的滚动额度，
+    // 绝不能套套餐周期（那是另一种到期语义）——交给账本逐笔拆。
+    expiresAtMs: addOnOwn ?? null, expirySource: addOnOwn ? 'own' : 'rolling',
+  }));
+  for (const p of (Array.isArray(top.dedicatedResourcePackages) ? top.dedicatedResourcePackages
+    : Array.isArray(top.dedicated_resource_packages) ? top.dedicated_resource_packages : [])) {
+    if (!p || typeof p !== 'object') continue;
+    push(quotaSeg(p, {
+      key: `pkg:${String(p.id || packageLabel(p))}`, label: packageLabel(p),
+      expiresAtMs: pickNum(p, ['expiresAt', 'expires_at']), expirySource: 'own',
+    }));
+  }
+  const org = top.orgResourcePackage || top.org_resource_package || top.sharedQuota || top.shared_quota;
+  const orgOwn = pickNum(org || {}, ['expiresAt', 'expires_at']);
+  push(quotaSeg(org, {
+    key: 'orgResourcePackage', label: '组织共享包',
+    // 组织包的到期由后台决定，接口没给就不编一个出来
+    expiresAtMs: orgOwn ?? null, expirySource: orgOwn ? 'own' : 'unknown',
+  }));
+
+  const usable = segs.filter((s) => s.available && (!s.expiresAtMs || s.expiresAtMs > now));
+  const { batches, total: batchTotal, expiredCount, expiredTotal, blockedTotal, unknownTotal } =
+    expiryBatches(segs, { now, ledger });
+  const total = segs.reduce((a, s) => a + (s.total > 0 ? s.total : 0), 0);
+  const used = segs.reduce((a, s) => a + s.used, 0);
+  const remaining = usable.reduce((a, s) => a + s.remaining, 0);
+  const expiring = usable.filter((s) => s.remaining > 0 && s.expiresAtMs);
+  const serverPct = pickNum(top, ['totalUsagePercentage', 'total_usage_percentage']);
+
+  return {
+    ok: true,
+    kind: 'qoder',
+    planTier,
+    userType: pickStr(top, ['userType', 'user_type']),
+    usageType: pickStr(top, ['usageType', 'usage_type']) || 'credits',
+    isHighestTier: typeof plan?.isHighestTier === 'boolean' ? plan.isHighestTier
+      : typeof plan?.is_highest_tier === 'boolean' ? plan.is_highest_tier : null,
+    isQuotaExceeded: Boolean(top.isQuotaExceeded ?? top.is_quota_exceeded ?? false),
+    periodStartMs,
+    periodEndMs,
+    upgradeUrl: pickStr(top, ['upgradeUrl', 'upgrade_url']),
+    segments: segs,
+    batches,
+    summary: {
+      total: round2(total),
+      used: round2(used),
+      remaining: round2(Math.max(remaining, batchTotal)),
+      byExpiry: batchTotal,
+      percentage: total > 0 ? Math.round((used / total) * 1000) / 10 : 0,
+      serverPercentage: serverPct === null ? null
+        : Math.round((serverPct >= 0 && serverPct <= 1 ? serverPct * 100 : serverPct) * 10) / 10,
+      segmentCount: segs.length,
+      batchCount: batches.length,
+      expiredCount,
+      expiredTotal: round2(expiredTotal),
+      blockedRemaining: round2(blockedTotal),
+      unknownExpiryTotal: round2(unknownTotal),
+      nearestExpiryMs: batches.find((b) => b.expiresAtMs)?.expiresAtMs ?? null,
+    },
+    daily: rule ? { ...rule, claimedToday: rule.claimStatus === 'CLAIMED' } : null,
+  };
+}
+
+/**
+ * 单账号取一次 credits。三个 GET 并发，全部只读、不刷新令牌：
+ * 用量 + 套餐（额度与周期）+ 活动列表（每日赠送的发放规则：金额与"领取后 N 天"）。
+ * 活动列表拿不到时不编规则：加购/赠送整块落到"到期未知"批次。
+ */
+export async function fetchAccountCredits(creds, { id = null } = {}) {
+  const [u, p, c] = await Promise.all([
+    fetchQuotaUsage(creds), fetchUserPlan(creds),
+    id ? listCampaigns(creds) : Promise.resolve({ kind: 'skip' }),
+  ]);
+  if (!u.ok) return { ok: false, kind: u.kind, error: u.error };
+  const usage = u.body;
+  const plan = p.ok ? p.body : null; // 套餐名拿不到不影响额度
+  const rule = c && c.kind === 'ok' ? creditGrantRule(c.campaigns) : null;
+  const ledger = id ? loadClaimLedger(id, { validityDays: rule?.validityDays || null }) : [];
+  const out = normalizeCredits({ usage, plan, rule, ledger });
+  if (!out.ok) return out;
+  const notes = [];
+  if (!p.ok) notes.push(`套餐名获取失败（${p.error}）`);
+  const rolling = (out.segments || []).find((s) => s.expirySource === 'rolling' && s.remaining > 0);
+  if (rolling && !rule) notes.push('活动列表没拿到，加购/赠送的发放规则（每日刷新 + 领取后 N 天）未知，该额度整块标为到期未知');
+  if (rolling && rule && !ledger.length) notes.push(`加购/赠送按「领取后 ${rule.validityDays} 天」到期，但本地没有领取记录，无法逐笔拆分`);
+  if (notes.length) out.note = `${out.note ? `${out.note}；` : ''}${notes.join('；')}`;
+  return out;
+}
+
+// ── credits 缓存（只存数字与日期，绝不存令牌）────────────────────────────
+export function loadCreditsCache() {
+  try {
+    const c = JSON.parse(fs.readFileSync(CREDITS_FILE, 'utf8'));
+    if (!c || typeof c !== 'object' || !c.accounts) return { version: 1, accounts: {} };
+    return c;
+  } catch { return { version: 1, accounts: {} }; }
+}
+
+export function saveCreditsCache(cache) {
+  ensureDirs();
+  fs.writeFileSync(CREDITS_FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
+}
+
+/**
+ * 老缓存里没有 batches 字段时按现有字段就地补算（含用本地领取账本还原滚动到期）。
+ * 只在读缓存路径上调用，不出网。
+ */
+export function withBatches(id, rec, now = nowMs()) {
+  if (!rec || typeof rec !== 'object') return rec;
+  if (Array.isArray(rec.batches) && rec.summary && typeof rec.summary.batchCount === 'number') return rec;
+  if (!Array.isArray(rec.segments)) return rec;
+  const ledger = loadClaimLedger(id, { validityDays: rec.daily?.validityDays || null, now });
+  const { batches, total, expiredCount, expiredTotal, blockedTotal, unknownTotal } =
+    expiryBatches(rec.segments, { now, ledger });
+  return {
+    ...rec,
+    batches,
+    summary: { ...(rec.summary || {}), byExpiry: total, batchCount: batches.length,
+      expiredCount, expiredTotal, blockedRemaining: blockedTotal, unknownExpiryTotal: unknownTotal,
+      nearestExpiryMs: batches.find((b) => b.expiresAtMs)?.expiresAtMs ?? null },
+  };
+}
+
+/**
+ * 汇总多个槽位的 credits。命中 TTL 缓存就不出网；force 或无缓存才请求。
+ * 账号之间留 300~700ms 间隔，别把只读接口打成压测。
+ * @returns {{accounts:Object<string,object>, requested:number, cachedCount:number, deferredBy?:string}}
+ */
+export async function collectCredits({ ids, force = false, ttlMs = CREDITS_TTL_MS } = {}) {
+  const list = (ids && ids.length ? ids : listSnapshots()).filter((id) => isValidSlotId(id));
+  const live = (() => { try { return scanLogin(getDataDir()); } catch { return null; } })();
+  const cache = loadCreditsCache();
+  // 切换进行中不读凭证：obtainAccountCreds 要解的正是那个正在被换掉的 auth.v1.dat，
+  // 读出来的身份可能半新半旧。此时只给缓存，并在结果里写明是被切换拦下来的。
+  const lock = readSwitchLock();
+  if (lock) {
+    const out = {};
+    for (const id of list) {
+      const prev = cache.accounts[id];
+      out[id] = prev
+        ? withBatches(id, { ...prev, fromCache: true, deferredBy: 'switching',
+            ageMs: Math.round(nowMs() - Number(prev.fetchedAtMs || 0)) })
+        : { ok: false, kind: 'switching', error: '有账号切换正在进行，稍后重试', fromCache: false };
+    }
+    return { accounts: out, requested: 0, cachedCount: list.length, deferredBy: 'switching' };
+  }
+  const out = {};
+  let requested = 0;
+  for (const [i, id] of list.entries()) {
+    const prev = cache.accounts[id];
+    const ageMs = prev ? nowMs() - Number(prev.fetchedAtMs || 0) : Infinity;
+    if (!force && prev && ageMs < ttlMs) {
+      out[id] = withBatches(id, { ...prev, fromCache: true, ageMs: Math.round(ageMs) });
+      continue;
+    }
+    const got = obtainAccountCreds(id, live);
+    if (got.error) {
+      out[id] = { ok: false, kind: 'creds', error: got.error, fromCache: Boolean(prev),
+        fetchedAtMs: prev?.fetchedAtMs ?? null, ...(prev ? { data: prev } : {}) };
+      continue;
+    }
+    requested++;
+    const r = await fetchAccountCredits(got.creds, { id });
+    const rec = {
+      ok: r.ok, kind: r.kind || 'qoder', fetchedAtMs: nowMs(), isLive: Boolean(got.isLive),
+      credsSource: got.source, uidMasked: maskUid(got.creds.uid),
+      error: r.ok ? undefined : r.error, note: r.note,
+      planTier: r.planTier, userType: r.userType, usageType: r.usageType,
+      isQuotaExceeded: r.isQuotaExceeded, periodStartMs: r.periodStartMs, periodEndMs: r.periodEndMs,
+      upgradeUrl: r.upgradeUrl, detailUrl: r.detailUrl, segments: r.segments || [],
+      batches: r.batches || [], summary: r.summary, daily: r.daily || null,
+    };
+    if (r.ok) cache.accounts[id] = rec;
+    out[id] = { ...rec, fromCache: false };
+    if (i < list.length - 1) await sleep(300 + (crypto.randomBytes(2).readUInt16BE(0) % 400));
+  }
+  try { saveCreditsCache(cache); } catch { /* 缓存写不进不影响本次结果 */ }
+  return { accounts: out, requested, cachedCount: list.length - requested };
 }
 
 // ── 签到日志 ──────────────────────────────────────────────────────────────

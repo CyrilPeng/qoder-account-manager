@@ -1,8 +1,8 @@
 ---
 name: account-status
-version: 2.0.0
-description: Show Qoder account slots, current login, credential expiry, sign-in status, and diagnose which client data directory is actually in use.
-description_zh: 查看 Qoder 账号槽位、当前登录账号、凭证有效期、签到状态，并自检实际生效的客户端数据目录与布局。
+version: 2.1.0
+description: Show Qoder account slots, current login, credential expiry, per-account credits segments with expiry dates, sign-in status, and diagnose which client data directory is actually in use.
+description_zh: 查看 Qoder 账号槽位、当前登录账号、凭证有效期、每个账号的 credits 额度分段与到期日、签到状态，并自检实际生效的客户端数据目录与布局。
 user-invocable: true
 argument-hint: ""
 ---
@@ -49,8 +49,27 @@ argument-hint: ""
    只读 `main.sqlite` 的计数与元信息，不读对话正文。输出会话总数、按工作区分布，
    以及 `chat_sessions` 是否存在账号语义列（实测为无 → 会话不按账号隔离）。
 
-6. 想要图形界面就用 account-console skill（`/account-console`），控制台内也有同款
-   「会话可见性」面板与切换前后对比。
+6. **额度与到期**（用户问"还有多少 credits / 什么时候过期"时跑这个）：
+
+   ```bash
+   node --no-warnings scripts/accounts.mjs credits              # 全部槽位
+   node --no-warnings scripts/accounts.mjs credits acct1 --refresh
+   ```
+
+   每个账号把剩余额度**按到期时间分批**输出（同一到期时刻的合成一批），一批一行，给积分数量、
+   还剩几天与来源池。三种到期语义不同，别混着跟用户讲：套餐额度随周期固定到期；**加购/赠送是
+   「每日 10:00(UTC+8) 刷新、领取后 N 天有效」的滚动额度**（N 取自活动接口，实测 30 天），逐笔到期
+   由本地签到领取记录还原，工具没记到的那部分标"到期未定"——不要替它编一个日期；专属包用各自
+   `expiresAt`。走三个**只读 GET**（用量/套餐/活动列表），不刷新令牌，所以活跃账号也能直接查；
+   5 分钟内命中 `credits.json` 缓存不出网。
+
+   - 报 `auth` = 该槽位登录态失效，额度只读不会替它续期，需在新客户端登录一次并 `save`
+     （或先跑签到让令牌轮换回新鲜）。
+   - 报 `enterprise` = 企业版额度在组织后台，接口只给详情页链接，别报成"额度为 0"。
+   - 数字没变化多半是缓存，加 `--refresh` 再看。
+
+7. 想要图形界面就用 account-console skill（`/account-console`），控制台里每张槽位卡片
+   内嵌同款 credits 分段条，另有「会话可见性」面板与切换前后对比。
 
 ## 布局与数据目录（务必理解，否则容易误判）
 

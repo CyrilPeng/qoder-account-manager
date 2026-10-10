@@ -1,8 +1,8 @@
 ---
 name: account-console
-version: 2.0.0
-description: Launch the local Qoder account console (browser UI) for switching accounts, saving slots, and daily sign-in.
-description_zh: 启动 Qoder 多账号本地控制台（浏览器图形界面），用于切换账号、保存槽位、每日签到。
+version: 2.1.0
+description: Launch the local Qoder account console (browser UI) for switching accounts, saving slots, daily sign-in, and per-account credits with expiry dates.
+description_zh: 启动 Qoder 多账号本地控制台（浏览器图形界面），用于切换账号、保存槽位、每日签到、查看每个账号的 credits 额度分段与到期日。
 user-invocable: true
 argument-hint: "[--stop|--restart|--no-browser]"
 ---
@@ -41,8 +41,10 @@ argument-hint: "[--stop|--restart|--no-browser]"
    | `--stop` | 停止服务 |
 
 3. 控制台能力：当前登录身份核对、槽位卡片（切换/单独签到/重命名/覆盖/删除/
-   **回退到上一代**）、保存当前账号为新槽位、一键全员签到、签到日志、快照档位开关、
-   环境自检、会话可见性前后对比（基线存 sessionStorage，页面重载不丢）。
+   **回退到上一代**）、**每张卡片内嵌的 credits 到期分批条**（一格 = 一个到期批次，颜色按紧迫度，
+   悬停给来源池/积分/精确到期时间/还剩几天；顶部一行给全部账号合计与最近到期，「刷新额度」按钮强制重取）、
+   保存当前账号为新槽位、
+   一键全员签到、签到日志、快照档位开关、环境自检、会话可见性前后对比（基线存 sessionStorage，页面重载不丢）。
 
 ## 服务生命周期（IDE 退出 3 分钟后自行结束；两侧都不当契约用）
 

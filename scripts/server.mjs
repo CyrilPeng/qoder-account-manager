@@ -18,6 +18,7 @@ import {
   readSigninLog, loadRegistry, saveRegistry, findAccount, isValidSlotId, maskUid,
   snapshotWhitelist, detectLayout, getDataDir, rollbackSnapshot, readSwitchLock,
   writeSwitchLock, clearSwitchLock, qoderRunning, DEFAULT_EXIT_AFTER_NO_QODER_SEC,
+  collectCredits,
 } from './qoder_lib.mjs';
 import { collectStatus, sessionVisibility } from './status.mjs';
 
@@ -399,6 +400,17 @@ async function handleApi(req, res, url) {
   if (route === '/api/sessions' && method === 'GET') {
     try {
       return send(res, 200, { ok: true, sessions: sessionVisibility() });
+    } catch (e) {
+      return send(res, 500, { ok: false, error: String(e?.message || e) });
+    }
+  }
+
+  // Credits：两个只读 GET（用量 + 套餐），服务端 5 分钟 TTL 缓存，?refresh=1 强制出网
+  if (route === '/api/credits' && method === 'GET') {
+    try {
+      const force = url.searchParams.get('refresh') === '1';
+      const r = await collectCredits({ force });
+      return send(res, 200, { ok: true, credits: r.accounts, requested: r.requested, cachedCount: r.cachedCount });
     } catch (e) {
       return send(res, 500, { ok: false, error: String(e?.message || e) });
     }

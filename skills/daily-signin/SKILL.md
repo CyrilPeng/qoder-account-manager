@@ -30,6 +30,10 @@ argument-hint: [账号id...]
    `fail`（含原因）。末行 `EVENTS_JSON:` 与 `QAM_JSON:` 是结构化结果，转述时用人类
    可读摘要即可，不要把 JSON 原样贴给用户。
 
+   想确认奖励真的到账，签完跑一次额度（只读、不动令牌，`--refresh` 跳过 5 分钟缓存）：
+   `node --no-warnings scripts/accounts.mjs credits --refresh`。控制台的「刷新额度」在签到
+   成功后也会自动触发一次。
+
 3. 失败处理指引：
    - `permanent_auth` / 「需重新登录」：该账号刷新令牌已失效。让用户在 Qoder 登录
      该账号后重新执行 `accounts.mjs save <id>` 更新快照。

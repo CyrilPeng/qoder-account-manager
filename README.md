@@ -32,9 +32,10 @@ Qoder CN IDE 的本地多账号管理工具：**图形控制台**、**快照式�
 | `account-console` | **打开本地图形控制台**（浏览器 UI）：切换/保存/签到/重命名/删除/档位开关 |
 | `account-switch` | 切换登录账号：备份当前登录态 → 恢复目标快照 → 重启 Qoder |
 | `daily-signin` | 为所有已保存账号领取每日签到 + 登录奖励（凭证自动续期） |
-| `account-status` | 查看槽位、当前登录、凭证有效期、签到状态 |
+| `account-status` | 查看槽位、当前登录、凭证有效期、**credits 额度分段与到期**、签到状态 |
 | —（CLI）`accounts.mjs doctor` | **环境自检**：实际生效的数据目录、布局、exe、不兼容槽位 |
 | —（CLI）`accounts.mjs sessions` | **会话可见性诊断**：本地会话/工作区计数，切换前后对比用（控制台内也有面板） |
+| —（CLI）`accounts.mjs credits` | **额度与到期**：把每个账号剩余的 credits **按到期时间分批**列出，一批一行、标还剩几天与来源池（控制台槽位卡片内嵌同一份数据） |
 | —（CLI）`accounts.mjs rollback <id> --yes` | 把槽位与它的上一代 `.bak` **互换**（覆盖保存后找回旧快照；再跑一次即换回） |
 
 图形界面走「本地 HTTP 服务 + 浏览器页面」形态（插件无法在 IDE 内加按钮或菜单）。
@@ -68,7 +69,7 @@ node -e "require('node:sqlite'); console.log('node:sqlite OK', process.version)"
 IDE 会把内容复制进版本化缓存，并写一条注册表记录：
 
 ```text
-~/.qoder-cn/plugins/cache/local/qoder-account-manager/0.2.0/
+~/.qoder-cn/plugins/cache/local/qoder-account-manager/<version>/
 installed_plugins_v2.json → "qoder-account-manager@local": { scope, installPath, version, installedAt, … }
 ```
 
@@ -139,8 +140,10 @@ node --no-warnings scripts/accounts.mjs list
 启动方式与参数见[命令参考](#consolemjs--控制台启动器)。服务输出
 `CONSOLE_URL:http://127.0.0.1:<port>/?t=<token>`，**地址必须带 token**（不带会返回 403 提示页）。
 页面本身是 `assets/console.html` 单文件，零外部依赖、离线可用，能显示当前登录身份核对、
-槽位卡片（切换/单独签到/重命名/回退/删除）、保存当前账号、一键全员签到、签到日志、
-快照档位开关、环境自检、会话可见性对比。
+槽位卡片（切换/单独签到/重命名/回退/删除）、**每张卡片内嵌的 credits 到期分批条**（一格 =
+一个到期批次，悬停出"来源池 / 积分 / 精确到分钟的到期时间 / 还剩几天"，顶部一行给全部账号
+合计与最近到期）、保存当前账号、一键全员签到、
+签到日志、快照档位开关、环境自检、会话可见性对比。
 
 - **服务不常驻：IDE 走了 3 分钟后它自己结束**。切换账号通常半分钟内就把 IDE 重新拉起，
   连续 3 分钟探测不到 `Qoder CN.exe` 基本就是用户真退出了，此时留一个能重启 IDE 的 HTTP
@@ -187,11 +190,65 @@ stdout 末尾多输出一行 `QAM_JSON:{...}`，控制台服务就是靠它解�
 | `rename <id> --name <n> [--json]` | 只改注册表里的备注名（不碰快照与凭证；80 字上限，`--name` 值不能以 `-` 开头） |
 | `doctor [--json]` | 环境自检：生效数据目录、布局、exe 解析结果、布局不兼容的槽位 |
 | `sessions [--json]` | 会话可见性诊断（只读计数与元信息，不读对话正文） |
+| `credits [id...] [--refresh] [--json]` | 各账号 credits 额度分段与到期日；不传 id = 全部槽位，5 分钟内走缓存 |
 
 切换动作在 `switch.mjs`（见下）；`rename` 与控制台的 `/api/rename` 等价。
 
 槽位 id 规则：**字母/数字/`_`/`-`，1~64 字符**（id 会拼进快照目录名，非法 id 在入口直接拒绝，
 `../x`、`a/b`、超长一律报错/400）。`--name` 的值不能以 `-` 开头（会被当成开关）。
+
+#### `credits` — 额度与到期
+
+```bash
+node --no-warnings scripts/accounts.mjs credits                 # 全部槽位
+node --no-warnings scripts/accounts.mjs credits acct1 --refresh # 只查一个并强制出网
+```
+
+额度**按到期时间分批**：同一到期时刻的剩余额度合成一批，到期时刻不同必然分开——所以"条"本身就是
+答案（一格 = 一批，格宽 = 该批额度占比，颜色按紧迫度：≤3 天红、≤7 天橙、≤21 天蓝、更久绿，
+到期日未定的画灰斜纹）。三种到期语义要分清：
+
+| 额度池 | 到期语义 | 数据来源 |
+| --- | --- | --- |
+| 套餐额度 `userQuota` | 随套餐周期固定到期 | `qoderUsage.expiresAt` / `plan.end_date` |
+| 加购/赠送 `addOnQuota` | **每日 10:00(UTC+8) 刷新、领取后 N 天有效**（滚动，与套餐周期无关） | 活动接口的 `benefit.validity` + 本地领取账本逐笔拆 |
+| 专属资源包 / 组织共享包 | 各自带 `expiresAt`；没带就标"到期由后台决定" | `dedicatedResourcePackages[]` / `orgResourcePackage` |
+
+接口只给 `addOnQuota` 的合计余额、不给逐笔到期，所以逐笔到期由本工具还原：签到日志里每次领取
+（`success` / `already` 且带 `reward`）算一笔，到期 = 领取时刻 + `validity.days` 天，按**先到期先扣**
+把余额分到各笔上；**在 IDE 里领走、工具没记到的那部分不假装知道**，单列成"到期未定"批次并写明原因。
+实测输出：
+
+```text
+acct2  100196715***@qq.com · 131****1891  [当前登录 · 凭证=ide-live · 套餐 Pro]
+  额度周期：2026/09/14 ~ 2026/10/14（剩 4 天）
+  每日赠送：每天领 100 Credits · 每日 10:00（UTC+8）刷新，领取后 30 天有效 · 今日已领
+  按到期分批 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░  3 批 · 共 1,052
+    ░ 11-08 到期 100（29 天后）← 加购/赠送额度 [领取于 2026-10-09]
+    ░ 11-09 到期 100（30 天后）← 加购/赠送额度 [领取于 2026-10-10]
+    ? 到期未知 852（到期未定）← 加购/赠送额度 [本地无领取记录，到期未知]
+    ▸ 套餐额度 · Pro    ████████████████████ 100.0%  2000/ 2000 剩     0  到期 2026/10/14（4 天后 · 随套餐周期） · 已用尽
+    ▸ 加购/赠送额度     ███████████░░░░░░░░░  53.0%  1148/ 2200 剩  1052  每日刷新 · 领取后 30 天到期 · 可用
+  合计：剩 1,052 / 4,200 credits（已用 75%，服务端口径 75%）· 2 池 / 3 批 · 最近到期 2026/11/08（29 天后）
+  ⓘ 其中 852 是每日赠送但本地没有领取记录，到期日只能待定（在 IDE 里领的不会被本工具记到）
+```
+
+控制台上方的「刷新额度」拿到的是同一份数据，渲染成分批条 + 两块列宽固定的明细；鼠标悬停（或 Tab
+聚焦）到任一格，弹出该批的**来源池、积分、精确到分钟的到期时间、还剩几天、领取于哪天**。
+
+- **只读**：三个 GET（用量 + 套餐 + 活动列表），都不刷新令牌。活跃账号因此也能直接查，不存在
+  "把正在用的账号踢下线"的风险——签到那套「只用不刷」策略在这里天然满足。活动列表拿不到时
+  不编造规则：加购/赠送整块标为"到期未知"。
+- **缓存**：结果落 `credits.json`，只含数字、日期、活动文案与掩码 uid（无令牌、无邮箱手机）。
+  5 分钟内重复调用不出网，`--refresh` 强制。控制台的「刷新额度」共用同一份缓存，签到完成与
+  切换落地后会自动强刷一次。
+- **失败分类**：`auth`（该槽位登录态失效，需重新登录一次并 `save`，或跑签到让令牌续期）、
+  `creds`（解不出可用凭证）、`network`、`server`、`invalid`，以及 `enterprise`——企业版额度归
+  组织后台，接口只返回详情页链接，页面与 CLI 都如实说明而不是显示 0。
+- 读不到额度**不影响**保存/切换/签到任何一条路径：那是独立的只读分支，失败只在原处告警。
+- **切换进行中一律不读**：`switch.lock` 有效时只返回缓存并标注 `switching`——要解的
+  `auth.v1.dat` 正是此刻被替换的那个文件，读出来的身份可能半新半旧。页面的「刷新额度」
+  在这段时间也是置灰的。
 
 #### `switch.mjs` — 账号切换
 
@@ -289,6 +346,9 @@ node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确
 | 槽位标了「布局不兼容」 | 那是旧布局的快照，客户端已升级，**无法恢复**。在新客户端登录该账号后重新 `save`。切换在关闭 IDE **之前**就会预检拦下，不会白关一次。 |
 | 签到报 `permanent_auth` | 该账号在别处登录导致 refreshToken 轮换作废。切回该账号登录一次再 `save`（缓存与快照同时刷新）。 |
 | 签到报 `live_expired` | 活跃账号的 access token 过期，且刻意不在它背后刷新。打开一次 IDE 让客户端自行续期。 |
+| 额度查询报 `auth` | 该槽位存下来的登录态已经失效（额度只读、不会替它续期）。在新客户端登录该账号后重新 `save`，或先跑一次签到让令牌轮换回新鲜。 |
+| 额度显示"企业版额度在组织后台" | `displayMode==='enterprise'` 的正常表现：这类账号的额度不在公开接口里，页面只给详情页链接，不会伪造一个数字。 |
+| 数字像没变 | 命中了 5 分钟缓存。点页面上的「刷新额度」或 CLI 加 `--refresh`；也可直接删掉 `credits.json`（下次重取）。 |
 | 槽位「全空了」 | 几乎一定是某次调用用了不同的 `QODER_AM_HOME`（或只在某个 shell 里临时设过）。把两个目录都 `ls` 一下对比。 |
 | 备注名变成乱码字符 | 请求体非合法 UTF-8 会被 400 拒绝：Git Bash 里用 curl 传中文会被转成 GBK。改用页面输入或 ASCII 名字。 |
 | 端口被占用 | 服务从 38117 起自动 +1 探测（最多 10 次），以输出的 `CONSOLE_URL` 为准；要固定端口设 `QAM_PORT`。 |
@@ -357,8 +417,9 @@ rm -rf ~/.qoder-account-manager
   勾选二次确认；agent / 脚本不会代你点切换按钮（该操作会重启你正在用的 IDE）。
 - **不越界读写**：只碰[原理](#原理)里白名单列出的文件，`main.sqlite` 等 29 条禁交换项
   在任何档位下都不交换；`sessions` 只读计数与元信息，不读对话正文。
-- **网络行为**：只有签到与令牌续期会出网，目标是 `openapi.qoder.com.cn`；除此之外零遥测、
-  零上报，纯离线也能完成保存/切换。claim 之间带 1~3s 随机抖动，避免脚本化高频请求。
+- **网络行为**：签到、令牌续期与**额度查询**会出网，目标都是 `openapi.qoder.com.cn`；额度只走
+  三个 GET（用量 / 套餐 / 活动列表），不携带也不写回令牌。除此之外零遥测、零上报，纯离线也能完成
+  保存/切换。claim 之间带 1~3s 随机抖动，额度多账号之间带 300~700ms 间隔，避免脚本化高频请求。
 - **信任边界（诚实说明）**：本工具以「当前 Windows 用户的权限」读取该用户的 DPAPI 密文，
   这正是 Qoder 自己做的事。它不试图解决"这台机器已被其他进程控制"的威胁模型——任何能
   在你的用户会话里执行代码的进程，理论上都能做同样的解密。
@@ -443,6 +504,7 @@ QODER_AM_HOME=D:\qoder-accounts node --no-warnings scripts/console.mjs
   snapshots/<id>.meta.json.bak  # 上一代的元数据（与 .bak 配对，回退时一起换）
   creds/<id>.json      # 令牌缓存（save 时同步、刷新后双写；明文，仅本机，等同登录态）
   signin-log.json      # 签到日志（滚动 200 条）
+  credits.json         # 额度缓存（只含数字/日期/掩码 uid，无令牌无邮箱；5 分钟 TTL，可删可重建）
 ```
 
 ### 已知边界
@@ -538,6 +600,30 @@ QODER_AM_HOME=D:\qoder-accounts node --no-warnings scripts/console.mjs
   `GET /sash/api/v1/me/campaigns` 全量列表，`POST .../campaigns/{id}/claim`
   幂等领取（Content-Length: 0）；必带 `Cosy-ClientType: 10`（缺失时返回空列表）。
   零 CLAIMABLE 时先查当日 CLAIMED grant 定真话，再盲发反学/硬编码活动 id 兜底。
+- **Credits 与到期（取证自 0.4.3 客户端）**：`app.asar` 里 `account.getQuotaUsage` /
+  `account.getUserPlan` 两个调用点及其响应校验函数给出了确切契约——
+  `GET /sash/api/v2/me/usage` 返回 `{displayMode, qoderUsage}`，`qoderUsage` 里
+  `userQuota` / `addOnQuota` / `dedicatedResourcePackages[]` / `orgResourcePackage`
+  各是一段额度池，每段 `total/used/remaining/percentage/unit`，专属包还带自己的
+  `expiresAt`、`available`、`status`（如 `QUOTA_DETAIL_STATUS_EXHAUSTED`）与
+  `displayLabels`（中文标题就在这里，取 `dimension==='title'` 的 `valueI18n['zh-CN']`）；
+  顶层 `expiresAt` 与 `GET /api/v2/user/plan` 的 `end_date` 一起决定额度周期。
+  字段既可能是 camel 也可能是 snake（客户端校验就是双取，本工具照做）。
+  `displayMode==='enterprise'` 时只有 `enterpriseUsage{openMode,detailUrl}`，本地拿不到数字，
+  于是页面与 CLI 都显示"额度在组织后台"并给链接，而不是硬凑一个 0。
+  两个端点都是只读 GET，不触发令牌轮换，所以活跃账号同样可以直接查。
+  **三种到期语义不同**（这是实测出来的，别想当然）：`userQuota` 随套餐周期固定到期；
+  `addOnQuota` 是**每日 10:00(UTC+8) 刷新、领取后 N 天有效**的滚动额度，`/sash/api/v1/me/campaigns`
+  的 `benefit.validity = {mode:'RELATIVE_DAYS', days:30}` 与活动文案「每日 10:00（UTC+8）刷新，
+  领取后 30 天有效」就是依据——它**不能**套用套餐的 `expiresAt`；专属资源包各自带 `expiresAt`。
+  由于用量接口只给 `addOnQuota` 的合计余额、不给逐笔到期，逐笔到期由 `loadClaimLedger` 从签到日志
+  还原（每次 `success`/`already` 且带 `reward` 的记录算一笔，到期 = 领取时刻 + N 天），
+  `expiryBatches` 按先到期先扣把余额分到各笔，拆不掉的归入"到期未知"批次——在 IDE 里领走的
+  那部分工具记不到，宁标未知也不编一个日期。
+  **展示层再按到期时刻把各池的剩余额度合并成"批次"**：同一 `expiresAt` 的合成一批，一批一条上
+  的一格；`available===false` 或已过期但仍有余额的额度不进条，单独在合计里点名
+  （`expiredTotal` / `blockedRemaining`），避免"看着有、实际用不了"。分批在数据层算，
+  CLI 与页面拿到的是同一份 `batches`，不会两处各算一遍。
 - **令牌续期**：`POST /api/v1/deviceToken/refresh`（drt-）/
   `/api/v1/jobToken/refresh`（jrt-）。刷新令牌一次性轮换，成功后新凭证**双写**到
   `creds/` 缓存与该槽位快照的 `auth.v1.dat`，防旧令牌失效锁死账号。

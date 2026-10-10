@@ -15,10 +15,10 @@
 // 红线: token 全程不输出到日志/终端。
 import {
   ensureDirs, loadRegistry, saveRegistry, findAccount, listSnapshots,
-  snapSlotDir, readSnapMeta, scanLogin, loadCreds, saveCreds, refreshCreds, listCampaigns,
+  snapSlotDir, scanLogin, saveCreds, refreshCreds, listCampaigns,
   claimCampaign, filterClaimable, dailyCreditsClaimed, learnDailyCampaignIds,
   KNOWN_DAILY_CAMPAIGNS, appendSigninLog, readSigninLog, maskUid, todayStr,
-  detectLayout, getDataDir, writeAuthV2, credsFromLogin, pickCredsSource,
+  detectLayout, getDataDir, writeAuthV2, obtainAccountCreds,
 } from './qoder_lib.mjs';
 
 function emitJson(obj) {
@@ -29,36 +29,9 @@ function credsExpiredSoon(c) {
   return c.expires_at_ms && c.expires_at_ms < Date.now() + 10 * 60 * 1000;
 }
 
-/** 取账号凭证：live（uid 匹配）> 「缓存 / 快照解密」中更新的那个。附带 isLive 供轮换策略判断。 */
-function obtainCreds(id, live) {
-  const reg = loadRegistry();
-  const a = findAccount(reg, id);
-  // uid 判据同时看注册表与快照：注册表缺项时快照仍能认出「这就是当前账号」
-  let snap = null, snapError = null;
-  try { snap = scanLogin(snapSlotDir(id)); } catch (e) { snapError = String(e?.message || e); }
-  const slotUid = snap?.uid || a?.uid || '';
-  const isLive = Boolean(live && slotUid && slotUid === live.uid);
-  if (isLive) {
-    const c = credsFromLogin(live);
-    saveCreds(id, c); // IDE 侧刚刷新过的最新令牌，回写缓存供该账号变为非活跃时使用
-    return { creds: c, source: 'ide-live', isLive: true };
-  }
-  if (!snap) return { error: `快照凭证解密失败——${snapError || '槽位不可读'}` };
-  const cached = loadCreds(id);
-  const choice = pickCredsSource({
-    cached, snap, savedAtMs: readSnapMeta(id)?.savedAtMs || 0,
-  });
-  if (choice === 'snapshot') {
-    // refreshToken 一次性轮换：缓存里那份可能已被服务端轮换掉、永久作废，而快照是
-    // 客户端自己的最新状态。旧实现无条件优先用缓存，于是「重新登录 + 重新 save」
-    // 之后签到仍报 permanent_auth，看起来像账号死了。
-    const c = credsFromLogin(snap);
-    saveCreds(id, c);
-    return { creds: c, source: 'snapshot', isLive: false };
-  }
-  if (choice === 'cache') return { creds: cached, source: 'cache', isLive: false };
-  return { error: '既无可用凭证缓存，快照也解不出令牌' };
-}
+// 凭证取用规则（live 优先、缓存与快照比谁新）已上收到 qoder_lib.obtainAccountCreds，
+// 与 credits 查询共用一份——credits 也要读非活跃账号的凭证，两处各写一遍迟早漂移。
+const obtainCreds = obtainAccountCreds;
 
 /**
  * 把续期后的令牌回写槽位快照的 auth.v1.dat（仅 v2 布局支持）。

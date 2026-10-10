@@ -102,6 +102,64 @@ input[type=checkbox]{accent-color:var(--accent)}
 .tiers input{width:auto}
 code{font-family:var(--mono);font-size:12px;background:var(--panel2);padding:1px 5px;border-radius:4px}
 .empty{color:var(--dim);font-size:13px;padding:14px 0;text-align:center}
+/* ── Credits 到期分批条 ─────────────────────────────────────────────
+   一格 = 一个"到期批次"（同一到期时刻的剩余额度合起来），条宽按该批额度占比；
+   颜色按紧迫度分档，悬停/聚焦出详情卡（哪来的、多少积分、精确到分钟的到期时间）。
+   下面两块明细共用同一个 grid 模板，列宽固定，所以各条 meter 一定对齐。 */
+.cred{margin-top:12px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg)}
+.cred-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted);
+  font-family:var(--mono);margin-bottom:9px}
+.cred-head .sp{flex:1}
+.cred-head b{color:var(--fg);font-weight:600}
+.cred-bar{display:flex;gap:2px;height:20px;padding:2px;border-radius:9px;
+  background:var(--panel2);border:1px solid var(--line)}
+.cred-bar .none{flex:1;border-radius:6px;
+  background:repeating-linear-gradient(45deg,var(--panel2),var(--panel2) 6px,var(--line) 6px,var(--line) 12px)}
+.cred-seg{position:relative;height:100%;border-radius:6px;min-width:4px;cursor:default;outline:none}
+.cred-seg:hover,.cred-seg:focus-visible{filter:brightness(1.25);box-shadow:0 0 0 2px var(--fg);z-index:31}
+/* 悬停/键盘聚焦才显出详情卡；缺了这条 .tip 会永远 display:none */
+.cred-seg:hover .tip,.cred-seg:focus-visible .tip{display:block}
+.t-urgent{background:var(--err)} .t-soon{background:var(--warn)}
+.t-mid{background:var(--accent)} .t-far{background:var(--ok)}
+.t-none{background:var(--dim)} .t-expired{background:var(--err);opacity:.5}
+/* 到期未知（每日赠送但本地没记到领取）：灰底斜纹，明确不是"还有很久" */
+.t-unknown{background:repeating-linear-gradient(45deg,var(--dim),var(--dim) 4px,var(--panel2) 4px,var(--panel2) 8px)}
+.cred-daily{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:var(--muted);margin-top:8px}
+.cred-daily .miss{color:var(--warn)}
+.cred-daily a{color:var(--accent)}
+.tip{display:none;position:absolute;bottom:calc(100% + 9px);left:50%;transform:translateX(-50%);
+  min-width:190px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;
+  background:var(--panel);box-shadow:0 10px 26px rgba(0,0,0,.4);z-index:30;
+  font:12px/1.65 var(--mono);color:var(--fg);white-space:nowrap;pointer-events:none}
+.tip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);
+  border:5px solid transparent;border-top-color:var(--line)}
+.tip .t-title{font-family:inherit;font-size:12.5px;font-weight:650;color:var(--fg);margin-bottom:3px}
+.tip .t-amt{font-size:15px;font-weight:700;color:var(--fg)}
+.tip .t-amt s{text-decoration:none;font-size:11px;color:var(--muted);margin-left:3px}
+.tip .t-row{color:var(--muted)}
+.tip .t-src{margin-top:4px;padding-top:4px;border-top:1px solid var(--line);color:var(--muted)}
+.tip .t-src i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+.cred-seg:first-child .tip{left:0;transform:none}
+.cred-seg:first-child .tip::after{left:18px;transform:none}
+.cred-seg:last-child .tip{left:auto;right:0;transform:none}
+.cred-seg:last-child .tip::after{left:auto;right:18px;transform:none}
+.cred-seg:only-child .tip{left:50%;transform:translateX(-50%)}
+.cred-seg:only-child .tip::after{left:50%;transform:translateX(-50%)}
+.cred-rows{display:grid;grid-template-columns:132px minmax(40px,1fr) 92px 88px;gap:5px 10px;
+  align-items:center;margin-top:9px;font-size:12px}
+.cred-rows + .cred-rows{margin-top:6px;padding-top:6px;border-top:1px dashed var(--line)}
+.cred-rows .hd{grid-column:1/-1;font-size:11px;color:var(--dim);letter-spacing:.04em;margin-top:2px}
+.cred-rows .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
+.cred-rows .who em{font-style:normal;color:var(--dim);font-size:11px;margin-left:5px}
+.cred-rows .dot{display:inline-block;width:8px;height:8px;border-radius:3px;margin-right:6px;vertical-align:1px}
+.cred-rows .meter{height:8px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);overflow:hidden}
+.cred-rows .meter i{display:block;height:100%}
+.cred-rows .num{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap;text-align:right}
+.cred-rows .num b{color:var(--fg);font-weight:600}
+.cred-rows .num s{text-decoration:none}
+.exp-warn{color:var(--warn)} .exp-err{color:var(--err)}
+.cred .note{margin:9px 0 0}
+.cred-badge{font-family:var(--mono)}
 </style>
 </head>
 <body>
@@ -110,9 +168,11 @@ code{font-family:var(--mono);font-size:12px;background:var(--panel2);padding:1px
     <div>
       <h1>Qoder 账号控制台</h1>
       <p class="sub" id="envline">正在读取环境…</p>
+      <p class="sub" id="cred-sum"></p>
     </div>
     <div class="row">
       <button class="sm" id="btn-refresh">刷新</button>
+      <button class="sm" id="btn-credits" title="读取每个账号的 credits 额度分段与到期日（只读接口，5 分钟内走服务端缓存）">刷新额度</button>
       <button class="sm" id="btn-doctor">环境自检</button>
       <button class="primary" id="btn-signin-all">一键全员签到</button>
     </div>
@@ -257,6 +317,193 @@ function fmtLeft(ms) {
   return dd > 0 ? `剩 ${dd} 天` : `剩 ${h} 小时`;
 }
 
+// ── Credits：额度分段与到期 ──────────────────────────────────────────────
+// 数据一律来自服务端 /api/credits（两个只读 GET + 5 分钟缓存）。页面只渲染，
+// 不自己算额度，也不碰凭证——活跃账号尤其不能背后刷令牌。
+let CRED = {};
+let CRED_AT = 0;
+let CRED_LOADING = false;
+
+const dayShort = (ms) => { if (!ms) return ''; const d = new Date(ms); return `${d.getMonth()+1}/${d.getDate()}`; };
+const dayLeft = (ms) => (ms === null || ms === undefined ? null : Math.ceil((ms - Date.now()) / 86400000));
+const expCls = (dl) => (dl === null ? 'exp-ok' : dl < 0 ? 'exp-err' : dl <= 7 ? 'exp-warn' : 'exp-ok');
+const fmtN = (n) => Math.round(Number(n) || 0).toLocaleString('en-US');
+const fmtDateTime = (ms) => {
+  if (!ms) return '';
+  const d = new Date(ms), p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+/** 紧迫度分档与后端 expiryTone 同口径：越接近到期越红；滚动/后台决定的标成未知灰纹 */
+const toneOf = (ms, source) => {
+  if (source === 'rolling' || source === 'unknown') return 'unknown';
+  if (!ms) return 'none';
+  const dl = dayLeft(ms);
+  return dl < 0 ? 'expired' : dl <= 3 ? 'urgent' : dl <= 7 ? 'soon' : dl <= 21 ? 'mid' : 'far';
+};
+const toneCls = (t) => 't-' + (t || 'none');
+
+/** 一个额度池的到期说法：套餐随周期固定，加购/赠送是每日刷新 + 领取后 N 天 */
+function poolExpiryText(s, daily) {
+  if (s.expirySource === 'rolling') {
+    return daily?.validityDays ? `每日刷新 · 领取后 ${daily.validityDays} 天` : '每日刷新 · 领取后按活动天数';
+  }
+  if (s.expirySource === 'unknown') return '到期由后台决定';
+  if (!s.expiresAtMs) return '无到期信息';
+  return `${dayShort(s.expiresAtMs)} 到期${s.expirySource === 'period' ? '<em>随周期</em>' : ''}`;
+}
+
+/** 旧缓存里没有 batches 字段时就地按同一规则分批 */
+function batchesFrom(segments) {
+  const map = new Map();
+  for (const s of segments || []) {
+    if (!s || s.available === false || !(s.remaining > 0)) continue;
+    if (s.expiresAtMs && s.expiresAtMs <= Date.now()) continue;
+    const k = s.expiresAtMs ? String(s.expiresAtMs) : 'none';
+    const b = map.get(k) || { expiresAtMs: s.expiresAtMs || null, credits: 0, sources: [] };
+    b.credits += s.remaining; b.sources.push(s.label);
+    map.set(k, b);
+  }
+  const total = [...map.values()].reduce((t, b) => t + b.credits, 0);
+  return [...map.values()]
+    .map((b) => ({ ...b, daysLeft: dayLeft(b.expiresAtMs), tone: toneOf(b.expiresAtMs),
+      share: total > 0 ? (b.credits / total) * 100 : 0 }))
+    .sort((x, y) => (x.expiresAtMs ?? Number.MAX_SAFE_INTEGER) - (y.expiresAtMs ?? Number.MAX_SAFE_INTEGER));
+}
+
+const daysText = (b) => !b.expiresAtMs ? '到期未定'
+  : b.daysLeft < 0 ? `已过期 ${-b.daysLeft} 天`
+  : b.daysLeft === 0 ? '今天到期' : `剩余 ${b.daysLeft} 天`;
+
+/** 悬停详情：把这一格的「哪来的 / 多少积分 / 几点到期 / 还剩几天」摊开 */
+function tipHtml(b) {
+  const title = b.sources.length === 1 ? b.sources[0] : `到期批次 · ${b.sources.length} 个额度池`;
+  const src = b.sources.map((s) => `<div class="t-src">${esc(s)}</div>`).join('');
+  return `<span class="tip" role="tooltip">
+    <div class="t-title">${esc(title)}</div>
+    <div class="t-amt">${fmtN(b.credits)} <s>积分</s></div>
+    <div class="t-row">到期时间 ${b.expiresAtMs ? esc(fmtDateTime(b.expiresAtMs)) : '未知（本地没有该笔领取记录）'}</div>
+    <div class="t-row">${esc(daysText(b))}</div>
+    ${b.note ? `<div class="t-row">${esc(b.note)}</div>` : ''}
+    ${b.sources.length > 1 ? src : ''}
+  </span>`;
+}
+
+/** 一个账号的额度块：条上的一格 = 一个到期批次，格宽 = 该批剩余额度占比 */
+function creditsHtml(a) {
+  const rec = CRED[a.id];
+  const head = `<div class="cred-head">Credits${rec && rec.deferredBy === 'switching' ? ' · 切换进行中，只给缓存' : ''}<span class="sp"></span>`
+    + `${rec ? `<span>${esc(rec.fetchedAt ? rec.fetchedAt : '')}${rec.fromCache ? ' · 缓存' : ''}</span>` : ''}</div>`;
+  if (CRED_LOADING && !rec) return `<div class="cred">${head}<div class="cred-empty">正在读取额度…</div></div>`;
+  if (!rec) return `<div class="cred">${head}<div class="cred-empty">未读取，点上方「刷新额度」</div></div>`;
+  if (!rec.ok) {
+    const hint = rec.kind === 'auth'
+      ? '该槽位的登录态已失效：在 Qoder 里登录一次该账号并重新保存，或先跑一次签到让令牌续期。'
+      : rec.kind === 'switching' ? '有账号切换正在进行——此刻快照可能只换了一半，等切换完成再点「刷新额度」。'
+      : rec.kind === 'creds' ? '解不出可用凭证——该槽位可能还没有快照。'
+      : rec.kind === 'network' ? '网络不可达，稍后重试。' : '稍后重试。';
+    return `<div class="cred">${head}<p class="note warn">${esc(rec.error || '获取失败')}（${esc(rec.kind || '?')}）<br>${hint}</p></div>`;
+  }
+  if (rec.kind === 'enterprise') {
+    return `<div class="cred">${head}<p class="note">${esc(rec.note || '企业版额度由组织后台管理，本地拿不到数字')}`
+      + (rec.detailUrl ? ` · <a href="${esc(rec.detailUrl)}" target="_blank" rel="noreferrer">去详情页</a>` : '') + '</p></div>';
+  }
+  const segs = rec.segments || [];
+  const bs = (rec.batches && rec.batches.length) ? rec.batches : batchesFrom(segs);
+  const poolTotal = bs.reduce((t, b) => t + b.credits, 0);
+  const bar = poolTotal > 0
+    ? `<div class="cred-bar">${bs.map((b) => {
+        const w = Math.max(1.2, (b.credits / poolTotal) * 100);
+        return `<span class="cred-seg ${toneCls(b.tone)}" style="width:${w.toFixed(2)}%" tabindex="0"
+          aria-label="${esc(dayShort(b.expiresAtMs))} 到期 ${fmtN(b.credits)} 积分">${tipHtml(b)}</span>`;
+      }).join('')}</div>`
+    : `<div class="cred-bar"><span class="none"></span></div>`;
+  const batchRows = bs.map((b) => `<div class="who"><span class="dot ${toneCls(b.tone)}"></span>${b.expiresAtMs ? esc(dayShort(b.expiresAtMs)) + ' 到期' : '到期未定'}</div>
+      <div class="meter"><i class="${toneCls(b.tone)}" style="width:${(b.share != null ? b.share : 100).toFixed(1)}%"></i></div>
+      <div class="num"><b>${fmtN(b.credits)}</b> 积分</div>
+      <div class="num ${b.expiresAtMs ? expCls(b.daysLeft) : 'exp-warn'}" title="${esc(b.note || '')}">${esc(daysText(b))}</div>`).join('');
+  const poolRows = segs.map((s) => `<div class="who" title="${esc(s.label)}${s.expiresAtMs ? ' · ' + fmtDateTime(s.expiresAtMs) + ' 到期' : ''}">${esc(s.label)}${s.status ? `<em>${esc(String(s.status).replace(/^QUOTA_DETAIL_STATUS_/, ''))}</em>` : ''}</div>
+      <div class="meter"><i class="${toneCls(toneOf(s.expiresAtMs, s.expirySource))}" style="width:${Math.max(1, Math.min(100, s.percentage)).toFixed(1)}%"></i></div>
+      <div class="num"><b>${fmtN(s.remaining)}</b><s>/${fmtN(s.total)}</s> ${s.percentage}%</div>
+      <div class="num ${s.expirySource === 'rolling' ? '' : expCls(dayLeft(s.expiresAtMs))}">${poolExpiryText(s, rec.daily)}</div>`).join('');
+  const d = rec.daily;
+  const dailyLine = d ? `<div class="cred-daily">
+      <span>${esc(d.title || '每日赠送')}</span><span style="color:var(--dim)"> · ${esc(d.description || `每日刷新，领取后 ${d.validityDays || '?'} 天有效`)}</span>
+      <span class="${d.claimedToday ? '' : 'miss'}">· ${d.claimedToday ? '今日已领' : '今日未领（点「单独签到」或「一键全员签到」领）'}</span>
+      ${d.detailUrl ? `<a href="${esc(d.detailUrl)}" target="_blank" rel="noreferrer">活动说明</a>` : ''}
+    </div>` : '';
+  const sm = rec.summary || {};
+  const nd = dayLeft(sm.nearestExpiryMs);
+  return `<div class="cred">
+    ${head}
+    ${bar}
+    ${dailyLine}
+    <div class="cred-rows">
+      <div class="hd">按到期分批 · ${bs.length} 批 / ${fmtN(poolTotal)} 积分${poolTotal ? ' · 悬停看详情' : ''}</div>
+      ${batchRows || '<div class="who" style="grid-column:1/-1;color:var(--dim)">没有可用余额（全部已用尽或已过期）</div>'}
+    </div>
+    <div class="cred-rows">
+      <div class="hd">额度池明细 · ${segs.length} 个 · 条宽 = 已用占比</div>
+      ${poolRows}
+    </div>
+    <p class="note">可用合计 <b>${fmtN(sm.byExpiry != null ? sm.byExpiry : sm.remaining)}</b> / ${fmtN(sm.total)} credits
+      · 已用 ${sm.percentage}%${sm.serverPercentage !== null ? `（服务端口径 ${sm.serverPercentage}%）` : ''}
+      ${sm.nearestExpiryMs ? ` · 已确定到期日里最近的是 ${esc(dayShort(sm.nearestExpiryMs))}（${nd < 0 ? `已过期 ${-nd} 天` : `${nd} 天后`}）` : ''}
+      ${rec.periodEndMs ? ` · 套餐周期 ${esc(dayShort(rec.periodStartMs))} ~ ${esc(dayShort(rec.periodEndMs))}` : ''}
+      ${sm.unknownExpiryTotal ? ` · <span class="exp-warn">另有 ${fmtN(sm.unknownExpiryTotal)} 是每日赠送、本地没记到领取，到期日待定</span>` : ''}
+      ${sm.expiredTotal ? ` · <span class="exp-err">另有 ${fmtN(sm.expiredTotal)} 挂在已过期批次，不计入</span>` : ''}
+      ${sm.blockedRemaining ? ` · <span class="exp-warn">另有 ${fmtN(sm.blockedRemaining)} 被标记不可用，不计入</span>` : ''}
+      ${rec.isQuotaExceeded ? ' · <span class="exp-err">服务端标记额度用尽</span>' : ''}</p>
+    ${rec.note ? `<p class="note">${esc(rec.note)}</p>` : ''}
+  </div>`;
+}
+
+/** 顶部一行总览：所有账号合计可用额度、批次数量与最快到期的那一批 */
+function creditsSummary() {
+  const ids = Object.keys(CRED);
+  if (!ids.length) return '';
+  let remaining = 0, nearest = null, bad = 0, ent = 0, batches = 0;
+  for (const id of ids) {
+    const r = CRED[id];
+    if (!r || !r.ok) { bad++; continue; }
+    if (r.kind !== 'qoder') { ent++; continue; }
+    const sm = r.summary || {};
+    remaining += sm.byExpiry != null ? sm.byExpiry : (sm.remaining || 0);
+    batches += sm.batchCount || ((r.batches || []).length);
+    const n = sm.nearestExpiryMs;
+    if (n && (nearest === null || n < nearest)) nearest = n;
+  }
+  const nd = dayLeft(nearest);
+  const cls = expCls(nd);
+  return `<span>额度合计可用 <b>${fmtN(remaining)}</b> credits · ${batches} 个到期批次</span>`
+    + (nearest ? ` <span class="${cls}">· 最近到期 ${dayShort(nearest)}（${nd < 0 ? `已过期 ${-nd} 天` : `${nd} 天后`}）</span>` : '')
+    + (bad ? ` <span class="exp-warn">· ${bad} 个账号没读到</span>` : '')
+    + (ent ? ` <span>· ${ent} 个企业版额度在组织后台</span>` : '')
+    + ` <span style="color:var(--dim)">· ${CRED_AT ? new Date(CRED_AT).toLocaleTimeString('zh-CN', { hour12: false }) : '未读取'}</span>`;
+}
+
+async function loadCredits(force = false) {
+  CRED_LOADING = true;
+  const btn = $('#btn-credits');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span>读取额度'; }
+  try {
+    const r = await api('/api/credits' + (force ? '?refresh=1' : ''));
+    if (!r.ok) throw new Error(r.error || '读取失败');
+    CRED = {};
+    for (const [id, rec] of Object.entries(r.credits || {})) {
+      CRED[id] = { ...rec, fetchedAt: rec.fetchedAtMs ? new Date(rec.fetchedAtMs).toLocaleString('zh-CN', { hour12: false }) : '' };
+    }
+    CRED_AT = Date.now();
+    if (STATUS) render(STATUS);
+    return r;
+  } catch (e) {
+    toast('读取额度失败：' + e.message, 'err');
+    return null;
+  } finally {
+    CRED_LOADING = false;
+    if (btn) { btn.disabled = false; btn.textContent = '刷新额度'; }
+  }
+}
+
 // 服务端的自动退出状态：remaining 由 /api/status 给，页面本地每秒递减，
 // 免得 15s 一次的探测让倒计时看起来一跳一跳的。
 const WD = { active: false, remaining: null, limit: null };
@@ -275,6 +522,8 @@ function render(s) {
   $('#envline').innerHTML =
     `${esc(i.layoutLabel)} · Qoder ${i.running ? '<span style="color:var(--ok)">运行中</span>' : '<span style="color:var(--dim)">未运行</span>'}`
     + ` · <code>${esc(i.dataDir)}</code>`;
+  $('#cred-sum').innerHTML = creditsSummary();
+  $('#btn-credits').disabled = Boolean(s.switching) || CRED_LOADING;
 
   // 顶部横幅优先级：切换进行中 > IDE 已退出（服务即将自动退出）> 隐藏
   if (s.switching) {
@@ -317,6 +566,15 @@ function render(s) {
       if (a.incomplete && a.incomplete.length) badges.push(`<span class="badge warn">未拷全 ${a.incomplete.length} 项</span>`);
       const st = a.todaySignin;
       if (st) badges.push(`<span class="badge ${st.status==='success'?'ok':st.status==='fail'?'err':''}">今日签到 ${esc(st.status)}</span>`);
+      const cr = CRED[a.id];
+      if (cr && cr.ok && cr.kind === 'qoder') {
+        const sm = cr.summary || {};
+        const nd = dayLeft(sm.nearestExpiryMs);
+        const avail = sm.byExpiry != null ? sm.byExpiry : sm.remaining;
+        badges.push(`<span class="badge ${nd !== null && nd < 0 ? 'err' : nd !== null && nd <= 7 ? 'warn' : 'ok'} cred-badge">可用 ${fmtN(avail)} · ${sm.batchCount || (cr.batches || []).length} 批</span>`);
+      } else if (cr && !cr.ok) {
+        badges.push('<span class="badge warn">额度未读到</span>');
+      }
       const warn = a.incompatible
         ? `<p class="note warn">该槽位是 ${esc(a.layout)} 快照，当前客户端是 ${esc(i.layout)}——客户端升级导致的历史遗留，
            无法恢复。请在新客户端登录该账号后重新保存。</p>` : '';
@@ -342,9 +600,9 @@ function render(s) {
           <div class="row">${badges.join(' ')}</div>
         </div>
         ${warn}${!a.snapshotReadable && !a.incompatible ? `<p class="note warn">快照暂时解不开（${esc(a.snapshotError||'未知')}），上面显示的是注册表缓存身份。</p>`:''}
+        ${creditsHtml(a)}
         <div class="actions">
-          <button class="sm primary" data-act="switch" data-id="${esc(a.id)}"
-            ${a.isLive||a.incompatible||a.snapshotReadable===false||busy?'disabled':''}>${a.isLive?'已是当前账号':'切换到此账号'}</button>
+          <button class="sm primary" data-act="switch" data-id="${esc(a.id)}"            ${a.isLive||a.incompatible||a.snapshotReadable===false||busy?'disabled':''}>${a.isLive?'已是当前账号':'切换到此账号'}</button>
           <button class="sm" data-act="signin" data-id="${esc(a.id)}" ${busy?'disabled':''}>单独签到</button>
           <button class="sm" data-act="rename" data-id="${esc(a.id)}">重命名</button>
           <button class="sm" data-act="overwrite" data-id="${esc(a.id)}" ${busy?'disabled':''}>用当前登录覆盖</button>
@@ -506,6 +764,7 @@ function watchSwitch() {
         else toast('超过 3 分钟没看到切换结果。服务可能随 Qoder 一起被回收了——数据都在磁盘上，'
           + '重新打开 Qoder 后再跑 /account-console 即可确认。', 'warn');
         loadSessions();   // 自动做一次切换前后的会话可见性对比
+        loadCredits(true); // 落地身份换了账号，额度也要重读（缓存里另一个账号的还新着，会只出网一次）
       }
     } catch {
       // 服务失去响应（多半是随 Qoder 被作业对象回收），连续 40 次后放弃
@@ -520,6 +779,7 @@ function watchSwitch() {
 
 // ── 事件绑定 ──
 $('#btn-refresh').onclick = () => refresh();
+$('#btn-credits').onclick = () => loadCredits(true);
 $('#btn-sessions').onclick = async () => { await loadSessions(); toast('已重新检测会话可见性', 'ok'); };
 $('#btn-sess-baseline').onclick = async () => {
   await loadSessions('before');
@@ -546,6 +806,7 @@ $('#btn-signin-all').onclick = () => run('全员签到', async () => {
   const bad = ev.filter(x => x.status === 'fail');
   toast(bad.length ? `签到完成，${bad.length} 个失败` : `签到完成：${ev.map(x=>x.status).join('/')}`, bad.length ? 'warn' : 'ok');
   if (r.text) { $('#switch-panel').style.display=''; $('#switch-log').textContent = r.text; }
+  await loadCredits(true);   // 签到通常会加额度，顺手刷新分段条
 });
 
 $('#btn-save').onclick = () => {
@@ -611,6 +872,7 @@ document.addEventListener('click', async (e) => {
       const ev = (r.json?.events||[])[0];
       toast(ev ? `${id}: ${ev.status} — ${ev.message}` : '签到完成', ev?.status==='fail'?'err':'ok');
       if (r.text) { $('#switch-panel').style.display=''; $('#switch-log').textContent = r.text; }
+      await loadCredits(true);   // 该账号额度可能因签到增加
     });
     return;
   }
@@ -694,6 +956,8 @@ refresh();
 // 首次加载记基线；若本次会话已有基线（比如切完账号页面被重新加载），就拿它做对比，
 // 不要用切换后的数字把基线覆盖掉。
 loadSessions(SESS_BEFORE === null ? 'before' : '');
+// 额度用服务端缓存（5 分钟 TTL），开页即读一次；过期或没缓存才出网
+loadCredits();
 // 轻量自刷新：状态会随签到/切换变化
 setInterval(() => { if (!BUSY) refresh(); }, 20000);
 // 倒计时本地每秒走一格：服务端 15s 才探一次，只靠它会让倒计时跳着走
