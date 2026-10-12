@@ -111,6 +111,19 @@ code{font-family:var(--mono);font-size:12px;background:var(--panel2);padding:1px
   font-family:var(--mono);margin-bottom:9px}
 .cred-head .sp{flex:1}
 .cred-head b{color:var(--fg);font-weight:600}
+.cred-head .tot{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.cred-head .tot b{font-size:14px}
+.chip{font-size:11px;padding:1px 7px;border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.chip.warn{color:var(--warn);border-color:var(--warn)}
+.chip.err{color:var(--err);border-color:var(--err)}
+/* 明细默认折叠：总量条是主角，需要时点开或键盘展开（原生 details，零 JS） */
+.cred-more{margin-top:9px;border-top:1px dashed var(--line);padding-top:6px}
+.cred-more summary{cursor:pointer;font-size:11.5px;color:var(--muted);user-select:none;list-style:none}
+.cred-more summary::-webkit-details-marker{display:none}
+.cred-more summary::before{content:'▸ ';color:var(--dim)}
+.cred-more[open] summary::before{content:'▾ '}
+.cred-more summary:hover,.cred-more summary:focus-visible{color:var(--accent);outline:none}
+.cred-more .cred-rows:first-of-type{margin-top:8px}
 .cred-bar{display:flex;gap:2px;height:20px;padding:2px;border-radius:9px;
   background:var(--panel2);border:1px solid var(--line)}
 .cred-bar .none{flex:1;border-radius:6px;
@@ -388,11 +401,26 @@ function tipHtml(b) {
   </span>`;
 }
 
-/** 一个账号的额度块：条上的一格 = 一个到期批次，格宽 = 该批剩余额度占比 */
+/** 一个账号的额度块：默认只留总量条（一格 = 一个到期批次，悬停看详情），明细折叠 */
 function creditsHtml(a) {
   const rec = CRED[a.id];
-  const head = `<div class="cred-head">Credits${rec && rec.deferredBy === 'switching' ? ' · 切换进行中，只给缓存' : ''}<span class="sp"></span>`
-    + `${rec ? `<span>${esc(rec.fetchedAt ? rec.fetchedAt : '')}${rec.fromCache ? ' · 缓存' : ''}</span>` : ''}</div>`;
+  const sm = (rec && rec.summary) || {};
+  const avail = sm.byExpiry != null ? sm.byExpiry : sm.remaining;
+  const chips = [];
+  if (rec && rec.ok && rec.kind === 'qoder') {
+    const nd0 = dayLeft(sm.nearestExpiryMs);
+    if (nd0 !== null) chips.push(`<span class="chip ${nd0 < 0 ? 'err' : nd0 <= 7 ? 'warn' : ''}">最近到期 ${esc(dayShort(sm.nearestExpiryMs))}</span>`);
+    if (rec.daily && !rec.daily.claimedToday) {
+      const label = rec.daily.amount ? `今日 ${fmtN(rec.daily.amount)} 未领` : '今日未领';
+      chips.push(`<span class="chip warn">${esc(label)}</span>`);
+    }
+    if (sm.unknownExpiryTotal) chips.push(`<span class="chip warn">${fmtN(sm.unknownExpiryTotal)} 到期未定</span>`);
+    if (sm.expiredTotal) chips.push(`<span class="chip err">${fmtN(sm.expiredTotal)} 已过期未扣完</span>`);
+    if (rec.isQuotaExceeded) chips.push('<span class="chip err">额度用尽</span>');
+  }
+  const head = `<div class="cred-head"><span class="tot">Credits${rec && rec.ok && rec.kind === 'qoder' ? ` 可用 <b>${fmtN(avail)}</b>` : ''}</span>`
+    + chips.join('')
+    + `<span class="sp"></span>${rec ? `<span>${esc(rec.fetchedAt ? rec.fetchedAt : '')}${rec.fromCache ? ' · 缓存' : ''}</span>` : ''}</div>`;
   if (CRED_LOADING && !rec) return `<div class="cred">${head}<div class="cred-empty">正在读取额度…</div></div>`;
   if (!rec) return `<div class="cred">${head}<div class="cred-empty">未读取，点上方「刷新额度」</div></div>`;
   if (!rec.ok) {
@@ -431,29 +459,32 @@ function creditsHtml(a) {
       <span class="${d.claimedToday ? '' : 'miss'}">· ${d.claimedToday ? '今日已领' : '今日未领（点「单独签到」或「一键全员签到」领）'}</span>
       ${d.detailUrl ? `<a href="${esc(d.detailUrl)}" target="_blank" rel="noreferrer">活动说明</a>` : ''}
     </div>` : '';
-  const sm = rec.summary || {};
   const nd = dayLeft(sm.nearestExpiryMs);
   return `<div class="cred">
     ${head}
     ${bar}
-    ${dailyLine}
-    <div class="cred-rows">
-      <div class="hd">按到期分批 · ${bs.length} 批 / ${fmtN(poolTotal)} 积分${poolTotal ? ' · 悬停看详情' : ''}</div>
-      ${batchRows || '<div class="who" style="grid-column:1/-1;color:var(--dim)">没有可用余额（全部已用尽或已过期）</div>'}
-    </div>
-    <div class="cred-rows">
-      <div class="hd">额度池明细 · ${segs.length} 个 · 条宽 = 已用占比</div>
-      ${poolRows}
-    </div>
-    <p class="note">可用合计 <b>${fmtN(sm.byExpiry != null ? sm.byExpiry : sm.remaining)}</b> / ${fmtN(sm.total)} credits
-      · 已用 ${sm.percentage}%${sm.serverPercentage !== null ? `（服务端口径 ${sm.serverPercentage}%）` : ''}
-      ${sm.nearestExpiryMs ? ` · 已确定到期日里最近的是 ${esc(dayShort(sm.nearestExpiryMs))}（${nd < 0 ? `已过期 ${-nd} 天` : `${nd} 天后`}）` : ''}
-      ${rec.periodEndMs ? ` · 套餐周期 ${esc(dayShort(rec.periodStartMs))} ~ ${esc(dayShort(rec.periodEndMs))}` : ''}
-      ${sm.unknownExpiryTotal ? ` · <span class="exp-warn">另有 ${fmtN(sm.unknownExpiryTotal)} 是每日赠送、本地没记到领取，到期日待定</span>` : ''}
-      ${sm.expiredTotal ? ` · <span class="exp-err">另有 ${fmtN(sm.expiredTotal)} 挂在已过期批次，不计入</span>` : ''}
-      ${sm.blockedRemaining ? ` · <span class="exp-warn">另有 ${fmtN(sm.blockedRemaining)} 被标记不可用，不计入</span>` : ''}
-      ${rec.isQuotaExceeded ? ' · <span class="exp-err">服务端标记额度用尽</span>' : ''}</p>
-    ${rec.note ? `<p class="note">${esc(rec.note)}</p>` : ''}
+    <details class="cred-more">
+      <summary>明细 · ${bs.length} 个到期批次 / ${segs.length} 个额度池${poolTotal ? ' · 也可悬停条上任意一格看单笔' : ''}</summary>
+      ${rec.deferredBy === 'switching' ? '<p class="note warn">有账号切换正在进行——此刻快照可能只换了一半，这里显示的是缓存。</p>' : ''}
+      ${dailyLine}
+      <div class="cred-rows">
+        <div class="hd">按到期分批 · ${bs.length} 批 / ${fmtN(poolTotal)} 积分</div>
+        ${batchRows || '<div class="who" style="grid-column:1/-1;color:var(--dim)">没有可用余额（全部已用尽或已过期）</div>'}
+      </div>
+      <div class="cred-rows">
+        <div class="hd">额度池明细 · ${segs.length} 个 · 条宽 = 已用占比</div>
+        ${poolRows}
+      </div>
+      <p class="note">可用合计 <b>${fmtN(avail)}</b> / ${fmtN(sm.total)} credits
+        · 已用 ${sm.percentage}%${sm.serverPercentage !== null ? `（服务端口径 ${sm.serverPercentage}%）` : ''}
+        ${sm.nearestExpiryMs ? ` · 已确定到期日里最近的是 ${esc(dayShort(sm.nearestExpiryMs))}（${nd < 0 ? `已过期 ${-nd} 天` : `${nd} 天后`}）` : ''}
+        ${rec.periodEndMs ? ` · 套餐周期 ${esc(dayShort(rec.periodStartMs))} ~ ${esc(dayShort(rec.periodEndMs))}` : ''}
+        ${sm.unknownExpiryTotal ? ` · <span class="exp-warn">另有 ${fmtN(sm.unknownExpiryTotal)} 是每日赠送、本地没记到领取，到期日待定</span>` : ''}
+        ${sm.expiredTotal ? ` · <span class="exp-err">另有 ${fmtN(sm.expiredTotal)} 挂在已过期批次，不计入</span>` : ''}
+        ${sm.blockedRemaining ? ` · <span class="exp-warn">另有 ${fmtN(sm.blockedRemaining)} 被标记不可用，不计入</span>` : ''}
+        ${rec.isQuotaExceeded ? ' · <span class="exp-err">服务端标记额度用尽</span>' : ''}</p>
+      ${rec.note ? `<p class="note">${esc(rec.note)}</p>` : ''}
+    </details>
   </div>`;
 }
 
