@@ -287,11 +287,14 @@ refreshToken 续期并双写回缓存与快照。
 #### `console.mjs` — 控制台启动器
 
 ```bash
-node --no-warnings scripts/console.mjs            # 启动或复用服务，并打开浏览器
-node --no-warnings scripts/console.mjs --no-browser
+node --no-warnings scripts/console.mjs            # 启动或复用服务，只打印地址（不弹系统浏览器）
+node --no-warnings scripts/console.mjs --browser  # 额外用系统默认浏览器打开页面
 node --no-warnings scripts/console.mjs --restart  # 改过服务端代码后用这个
 node --no-warnings scripts/console.mjs --stop     # 按 server.json 里的精确 pid 停止
 ```
+
+页面默认交给 Qoder 内置浏览器打开（`/account-console` 会自己完成这一步），避免同一个页面
+在内置浏览器和系统浏览器里各开一份。
 
 #### 环境变量
 

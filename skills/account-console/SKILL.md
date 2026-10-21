@@ -1,10 +1,10 @@
 ---
 name: account-console
-version: 2.1.0
+version: 2.2.0
 description: Launch the local Qoder account console (browser UI) for switching accounts, saving slots, daily sign-in, and per-account credits with expiry dates.
 description_zh: 启动 Qoder 多账号本地控制台（浏览器图形界面），用于切换账号、保存槽位、每日签到、查看每个账号的 credits 额度分段与到期日。
 user-invocable: true
-argument-hint: "[--stop|--restart|--no-browser]"
+argument-hint: "[--stop|--restart|--browser]"
 ---
 
 # Qoder 账号控制台
@@ -22,25 +22,36 @@ argument-hint: "[--stop|--restart|--no-browser]"
 
 ## 流程
 
-1. 启动（或复用）服务并打开浏览器：
+1. 启动（或复用）服务：
 
    ```bash
    node --no-warnings scripts/console.mjs
    ```
 
-   输出 `CONSOLE_URL:http://127.0.0.1:<port>/?t=<token>`。把**完整地址**给用户
+   输出 `CONSOLE_URL:http://127.0.0.1:<port>/?t=<token>`。**启动器不再弹系统浏览器**
+   （默认只在 IDE 内置浏览器里看，避免同一页面开两遍），把**完整地址**也给用户
    （不带 token 打不开，服务会返回 403 提示页）。
 
-2. 参数：
+2. 用 IDE 内置浏览器打开该地址：
+
+   ```
+   mcp__browser-use__navigate_page  { type: "url", url: "<CONSOLE_URL 完整地址>" }
+   ```
+
+   随后用 `take_snapshot`（或 `take_screenshot`）确认渲染出「Qoder 账号控制台」而不是
+   403 提示页——token 漏了只会看到提示页，不报错。拿不到 browser-use 工具时（纯 CLI
+   场景）就把地址交给用户，或改用 `console.mjs --browser` 走系统默认浏览器。
+
+3. 参数：
 
    | 参数 | 作用 |
    | --- | --- |
-   | （无） | 启动或复用服务，并打开浏览器 |
-   | `--no-browser` | 只启动服务，打印地址 |
+   | （无） | 启动或复用服务，只打印地址（页面由内置浏览器打开） |
+   | `--browser` | 额外用系统默认浏览器打开页面 |
    | `--restart` | 重启服务（改完服务端代码后用） |
    | `--stop` | 停止服务 |
 
-3. 控制台能力：当前登录身份核对、槽位卡片（切换/单独签到/重命名/覆盖/删除/
+4. 控制台能力：当前登录身份核对、槽位卡片（切换/单独签到/重命名/覆盖/删除/
    **回退到上一代**）、**每张卡片内嵌的 credits 到期分批条**（一格 = 一个到期批次，颜色按紧迫度，
    悬停给来源池/积分/精确到期时间/还剩几天；批次表与额度池表默认折叠在「明细」里，
    最近到期/今日未领/到期未定等提醒以小标签常驻，「刷新额度」按钮强制重取）、

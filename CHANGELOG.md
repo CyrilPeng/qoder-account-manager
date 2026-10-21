@@ -8,6 +8,14 @@
 尚未发版的内容放在「未发布」，发版时改写成 `## vX.Y.Z` 并同步 `.qoder-plugin/plugin.json`
 的 `version`。
 
+## 未发布
+
+### 变更
+
+- 控制台启动器**不再自动弹系统浏览器**：`console.mjs` 默认只启动/复用服务并打印
+  `CONSOLE_URL`，页面由 `/account-console` 在 Qoder 内置浏览器里打开；要用系统默认浏览器
+  改成加 `--browser`（原先的 `--no-browser` 已无意义，删掉）。
+
 ## v0.3.1
 
 控制台里 credits 那块不再一上来铺一屏表格：默认只留总量条，明细折叠起来按需展开。

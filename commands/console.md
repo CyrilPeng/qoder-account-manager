@@ -1,6 +1,6 @@
 ---
 description: 打开 Qoder 账号控制台（图形界面切换账号/签到/管理槽位）
-argument-hint: "[--stop|--restart]"
+argument-hint: "[--stop|--restart|--browser]"
 ---
 
 启动 Qoder 多账号本地控制台（浏览器图形界面），这是切换账号的**首选入口**。
@@ -11,14 +11,16 @@ argument-hint: "[--stop|--restart]"
    node --no-warnings <插件根>/scripts/console.mjs $ARGUMENTS
    ```
 
-   启动器会以 **detached** 方式拉起服务并自动打开浏览器，输出形如
+   启动器会以 **detached** 方式拉起服务，输出形如
    `CONSOLE_URL:http://127.0.0.1:<port>/?t=<token>`。若服务已在运行则直接复用。
+   **默认不弹系统浏览器**——把地址交给 IDE 内置浏览器打开（`browser-use` 的
+   `navigate_page`），要系统默认浏览器才加 `--browser`。
 
 2. 把 `CONSOLE_URL` 完整地址转述给用户（含 token，缺 token 打不开）。
    告知：服务**不需要常驻**——登录数据固化在 `~/.qoder-account-manager/`，服务随 Qoder
    退出被关掉也没关系，下次打开 Qoder 重新执行本命令，所有槽位原样可用。
 
-3. 参数：`--stop` 停止服务，`--restart` 重启服务，`--no-browser` 只启动不开浏览器。
+3. 参数：`--stop` 停止服务，`--restart` 重启服务，`--browser` 额外用系统默认浏览器打开。
 
 ## 注意
 

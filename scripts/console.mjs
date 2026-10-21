@@ -1,9 +1,12 @@
 // console.mjs — 本地账号控制台启动器
 // 用法:
-//   node --no-warnings console.mjs            启动（或复用已在跑的）服务并打开浏览器
-//   node --no-warnings console.mjs --no-browser   只启动服务，打印地址
+//   node --no-warnings console.mjs            启动（或复用已在跑的）服务，只打印地址
+//   node --no-warnings console.mjs --browser  再用系统默认浏览器打开页面
 //   node --no-warnings console.mjs --stop     停止服务
 //   node --no-warnings console.mjs --restart  重启服务
+//
+// 默认不弹系统浏览器：页面是在 IDE 里看的，agent 拿到 CONSOLE_URL 后用内置浏览器打开，
+// 启动器再 start 一次等于同一个页面开两遍。
 //
 // 为什么服务要 detached：切换账号会关闭并重启 Qoder IDE。若服务是 IDE/agent 的
 // 子进程，会随 IDE 一起被杀，浏览器页面立刻失去后端、看不到切换进度也拿不到结果。
@@ -19,7 +22,7 @@ const SERVER = path.join(SCRIPT_DIR, 'server.mjs');
 const PORT_FILE = path.join(MGR_DIR, 'server.json');
 
 const args = process.argv.slice(2);
-const wantBrowser = !args.includes('--no-browser');
+const wantBrowser = args.includes('--browser');
 
 function readPortFile() {
   try {
@@ -49,6 +52,13 @@ function openBrowser(url) {
     return !(r2.error || r2.status !== 0);
   }
   return true;
+}
+
+function printUrl(url) {
+  console.log(`CONSOLE_URL:${url}`);
+  if (!wantBrowser) {
+    console.log('提示: 未弹系统浏览器。在 Qoder 内置浏览器里打开上面的地址，或加 --browser 用默认浏览器。');
+  }
 }
 
 function stopServer(info) {
@@ -93,7 +103,7 @@ async function main() {
     if (!args.includes('--restart')) {
       console.log(`复用已在运行的控制台服务 (pid=${info.pid}, port=${info.port})`);
       if (wantBrowser) openBrowser(info.url);
-      console.log(`CONSOLE_URL:${info.url}`);
+      printUrl(info.url);
       return;
     }
     stopServer(info);
@@ -118,7 +128,7 @@ async function main() {
     const opened = openBrowser(ready.url);
     if (!opened) console.log('自动打开浏览器失败，请手动访问下面的地址。');
   }
-  console.log(`CONSOLE_URL:${ready.url}`);
+  printUrl(ready.url);
   console.log('\n提示: 登录数据固化在 ~/.qoder-account-manager/，与服务是否常驻无关。');
   console.log('      服务默认在 Qoder 连续 3 分钟不在运行后自行退出（省内存）；');
   console.log('      要常驻就设 config.json 的 exitAfterNoQoderSec = 0，或在控制台「快照策略」里改。');
