@@ -8,13 +8,15 @@
 尚未发版的内容放在「未发布」，发版时改写成 `## vX.Y.Z` 并同步 `.qoder-plugin/plugin.json`
 的 `version`。
 
-## 未发布
+## v0.4.0
+
+控制台页面改在 IDE 内置浏览器里看，启动器不再往系统浏览器多弹一份。
 
 ### 变更
 
-- 控制台启动器**不再自动弹系统浏览器**：`console.mjs` 默认只启动/复用服务并打印
-  `CONSOLE_URL`，页面由 `/account-console` 在 Qoder 内置浏览器里打开；要用系统默认浏览器
-  改成加 `--browser`（原先的 `--no-browser` 已无意义，删掉）。
+- `console.mjs` 默认只启动/复用服务并打印 `CONSOLE_URL`，**不再自动弹系统浏览器**；页面由
+  `/account-console` 交给 Qoder 内置浏览器打开并用快照确认渲染。要用系统默认浏览器改成加
+  `--browser`（原先的 `--no-browser` 已成默认，删掉）。
 
 ## v0.3.1
 
