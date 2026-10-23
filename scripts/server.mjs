@@ -28,14 +28,23 @@ const PORT_FILE = path.join(MGR_DIR, 'server.json');
 const DEFAULT_PORT = Number(process.env.QAM_PORT || 38117);
 
 const TOKEN = process.env.QAM_TOKEN || crypto.randomBytes(16).toString('hex');
+// 页面加载后会把 token 移出地址栏；刷新时浏览器只能靠这个同站 cookie 过鉴权。
+// 与 token 分离、绑定进程：服务重启后旧 cookie 自然失效。
+const SESSION_COOKIE = 'qam_session';
+const SESSION = crypto.randomBytes(16).toString('hex');
 
 // ── CLI 调用 ──────────────────────────────────────────────────────────────
+// 记录在跑的 CLI（保存/签到等）。停服务前必须等它们写完，否则会在写盘中途丢下子进程。
+let cliInFlight = 0;
+
 /** 跑一个 CLI 脚本并解析 QAM_JSON: 行（不靠猜 stdout 排版） */
 function runCli(script, args, { timeout = 180000 } = {}) {
+  cliInFlight += 1;
   return new Promise((resolve) => {
     execFile(process.execPath, ['--no-warnings', path.join(SCRIPT_DIR, script), ...args],
       { encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 8 * 1024 * 1024 },
       (err, stdout, stderr) => {
+        cliInFlight -= 1;
         const out = String(stdout || '');
         const line = out.split('\n').filter((l) => l.startsWith('QAM_JSON:')).pop();
         let json = null;
@@ -185,14 +194,17 @@ class HttpError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
-function send(res, code, body, type = 'application/json; charset=utf-8') {
+function send(res, code, body, type = 'application/json; charset=utf-8', extraHeaders = {}) {
   const buf = typeof body === 'string' ? Buffer.from(body, 'utf8') : Buffer.from(JSON.stringify(body), 'utf8');
   res.writeHead(code, {
     'Content-Type': type,
     'Content-Length': buf.length,
     'Cache-Control': 'no-store',
-    // 页面由 token 保护，不需要 cookie；显式关掉减少误用面
-    'Set-Cookie': '',
+    // 页面地址曾带 token；禁掉 Referer 与外链泄露，再挡一层嗅探与内嵌
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    ...extraHeaders,
   });
   res.end(buf);
 }
@@ -222,22 +234,50 @@ function readBody(req, limit = 64 * 1024) {
   });
 }
 
-function authorized(req, url) {
+function readCookie(req, name) {
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return null;
+}
+
+/** 返回 'token' | 'cookie' | null。cookie 用于页面刷新（地址栏里的 token 已抹掉） */
+function authMethod(req, url) {
   const t = url.searchParams.get('t') || req.headers['x-qam-token'];
-  if (typeof t !== 'string' || t.length < 16) return false;
-  // 定长比较，避免时序侧信道
-  const a = Buffer.from(t.padEnd(64, '\0').slice(0, 64));
-  const b = Buffer.from(TOKEN.padEnd(64, '\0').slice(0, 64));
-  if (!crypto.timingSafeEqual(a, b)) return false;
-  // Host 白名单：挡 DNS rebinding（外部域名解析到 127.0.0.1 后仍带自己的 Host 头）
+  if (typeof t === 'string' && t.length >= 16) {
+    // 定长比较，避免时序侧信道
+    const a = Buffer.from(t.padEnd(64, '\0').slice(0, 64));
+    const b = Buffer.from(TOKEN.padEnd(64, '\0').slice(0, 64));
+    if (crypto.timingSafeEqual(a, b)) return 'token';
+  }
+  const c = readCookie(req, SESSION_COOKIE);
+  if (typeof c === 'string' && c.length === SESSION.length) {
+    const a = Buffer.from(c);
+    const b = Buffer.from(SESSION);
+    if (crypto.timingSafeEqual(a, b)) return 'cookie';
+  }
+  return null;
+}
+
+/** Host 白名单：挡 DNS rebinding（外部域名解析到 127.0.0.1 后仍带自己的 Host 头） */
+function hostAllowed(req) {
   const host = String(req.headers.host || '');
   return /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(host);
 }
 
+function authorized(req, url) {
+  return Boolean(authMethod(req, url)) && hostAllowed(req);
+}
+
 // ── 路由 ──────────────────────────────────────────────────────────────────
+let shuttingDown = false;
+
 async function handleApi(req, res, url) {
   const route = url.pathname;
   const method = req.method || 'GET';
+
+  if (shuttingDown && route !== '/api/ping') throw new HttpError(503, '服务正在退出');
 
   if (route === '/api/ping') return send(res, 200, { ok: true, pong: Date.now() });
 
@@ -421,7 +461,30 @@ async function handleApi(req, res, url) {
     return send(res, 200, { ...r, cmd: 'doctor' });
   }
 
+  // 让服务自己退出。--stop 首选这条路：不按 pid 盲杀，也不会误伤在跑的 CLI。
+  if (route === '/api/shutdown' && method === 'POST') {
+    assertNotSwitching('停止服务');
+    if (cliInFlight > 0) {
+      throw new HttpError(409, `有 ${cliInFlight} 个操作正在执行（保存/签到等），等它完成再停服务`);
+    }
+    shuttingDown = true;
+    send(res, 200, { ok: true, message: '服务正在退出' });
+    setTimeout(() => shutdown('请求停止'), 100);
+    return;
+  }
+
   return send(res, 404, { ok: false, error: `未知接口: ${method} ${route}` });
+}
+
+/** 优雅退出：先摘掉 server.json，再等连接收尾（keep-alive 兜底 1s） */
+function shutdown(reason) {
+  if (watchdogTimer) clearInterval(watchdogTimer);
+  watchdogTimer = null;
+  try { fs.rmSync(PORT_FILE, { force: true }); } catch { /* ignore */ }
+  console.log(`控制台服务退出（${reason}），pid=${process.pid}。登录数据保留在 ${MGR_DIR}。`);
+  const hardExit = setTimeout(() => process.exit(0), 1000);
+  hardExit.unref();
+  server.close(() => process.exit(0));
 }
 
 const server = http.createServer(async (req, res) => {
@@ -429,7 +492,8 @@ const server = http.createServer(async (req, res) => {
 
   // 首页：无 token 也给一个提示页，避免用户直接访问端口时看到裸错误
   if (url.pathname === '/' || url.pathname === '/index.html') {
-    if (!authorized(req, url)) {
+    const method = authMethod(req, url);
+    if (!method || !hostAllowed(req)) {
       return send(res, 403, '<!doctype html><meta charset="utf-8">'
         + '<body style="font:14px system-ui;padding:40px;color:#333">'
         + '<h3>需要访问令牌</h3><p>请通过 <code>/account-console</code> 命令或 console.mjs 启动器打开本页。</p>'
@@ -438,7 +502,12 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const html = fs.readFileSync(HTML_PATH, 'utf8');
-      return send(res, 200, html, 'text/html; charset=utf-8');
+      // 用 token 打开时换发同站会话 cookie：页面随后会把 token 从地址栏抹掉，
+      // 刷新时浏览器仍能凭 cookie 过鉴权。
+      const extra = method === 'token'
+        ? { 'Set-Cookie': `${SESSION_COOKIE}=${SESSION}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` }
+        : {};
+      return send(res, 200, html, 'text/html; charset=utf-8', extra);
     } catch (e) {
       return send(res, 500, { ok: false, error: `读取 console.html 失败: ${e?.message || e}` });
     }

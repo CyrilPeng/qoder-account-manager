@@ -1,12 +1,49 @@
 # 更新日志
 
 本项目遵循语义化版本。这里记录**用户可感知的行为变更**；实现细节与取证过程写在
-`README.md` 的「原理」一节，不在此重复。
+`docs/design.md`，不在此重复。
 
 分组约定：`新增` / `变更` / `修复` / `安全` / `文档` / `维护`，版本段可另加 `升级说明`。
 一行一条，只写用户能感知的行为变更；不记文件级细节，也不记没进过任何发布版本的中间状态。
 尚未发版的内容放在「未发布」，发版时改写成 `## vX.Y.Z` 并同步 `.qoder-plugin/plugin.json`
 的 `version`。
+
+## 未发布
+
+首页只留安装、速查与边界摘要，细节按用途拆进 `docs/`；同时把“停服务”和“token 留在地址栏”
+这两个长期风险收掉。
+
+### 变更
+
+- README 从 696 行压到 126 行：功能、安装、快速上手、命令速查、安全与边界摘要留在首页，
+  完整安装方式、命令参数、控制台行为、安全模型、原理取证、故障排查、开发发版分别拆到
+  `docs/install|commands|console|security|design|troubleshooting|dev.md`。
+- 停止控制台改为让服务自己退出：新增 `POST /api/shutdown`，`--stop` 优先走它；服务卡死时
+  才兜底按 pid 结束，且先核对命令行确实是 `server.mjs`、启动时间与 `server.json` 相符，
+  去掉会连子进程一起杀的 `/T`。有保存/签到在执行时拒绝停止，避免写盘中途被打断。
+
+### 安全
+
+- 凭据类数据落盘收紧：管理目录按 0700、文件按 0600 创建（POSIX 生效；Windows 实际以用户
+  ACL 为准），覆盖 `creds/`、注册表、`config.json`、签到日志、切换锁与额度缓存。
+- 控制台响应统一补 `Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、
+  `X-Frame-Options: DENY`。
+- 页面把 token 存进 `sessionStorage` 后立即从地址栏抹掉，并由服务端换发 HttpOnly、
+  `SameSite=Strict` 的会话 cookie：浏览器历史里不再留可用的访问地址，刷新页面仍可用；
+  服务重启后 cookie 与旧 token 一起失效，需用新地址。
+
+### 修复
+
+- 到期紧迫度把“刚过期不到一天”的时间点误判成红色紧急（`urgent`），改为按“不晚于当前时刻”
+  直接判 `expired`。批次条本身不受影响（过期项本来就不进条），修正的是提示文字与分档。
+
+### 维护
+
+- 新增 `tests/`（`node --test`）：到期分档与分批、滚动账本、三种到期语义、快照红线不变量、
+  页面离线性与 token 处理、服务鉴权/响应头/自我退出、文档内链与 README 长度。
+- 新增 `scripts/release.mjs`：发版前检查版本与 CHANGELOG/tag 一致、跑校验器与测试、确认
+  发布包不含账号数据、扫描本机用户名/邮箱/手机/令牌明文，再打包并可选发布与核对 digest。
+- `tests/docs.test.mjs` 守卫 README 入口与 docs 内链，避免拆分后再次漂移。
 
 ## v0.4.0
 

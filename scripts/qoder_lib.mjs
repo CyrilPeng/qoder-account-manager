@@ -149,8 +149,20 @@ export const SNAPSHOT_DIRS = [
 ];
 
 // ── 基础工具 ──────────────────────────────────────────────────────────────
+/** 原子写 + 收紧权限：这些文件含登录态或本机路径，POSIX 下 0600；Windows 无 mode 语义，靠目录 ACL */
+function writePrivate(file, data, mode = 0o600) {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, data, { mode });
+  try { fs.chmodSync(tmp, mode); } catch { /* Windows 上 chmod 只切只读位 */ }
+  fs.renameSync(tmp, file);
+  try { fs.chmodSync(file, mode); } catch { /* 同上 */ }
+}
+
 export function ensureDirs() {
-  for (const d of [MGR_DIR, SNAP_DIR, CREDS_DIR]) fs.mkdirSync(d, { recursive: true });
+  for (const d of [MGR_DIR, SNAP_DIR, CREDS_DIR]) {
+    fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    try { fs.chmodSync(d, 0o700); } catch { /* Windows 忽略 */ }
+  }
 }
 
 export function sleep(ms) {
@@ -244,9 +256,7 @@ export function loadConfig() {
 
 export function saveConfig(cfg) {
   ensureDirs();
-  const tmp = CONFIG_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
-  fs.renameSync(tmp, CONFIG_FILE);
+  writePrivate(CONFIG_FILE, JSON.stringify(cfg, null, 2));
 }
 
 // ── 数据目录 / 布局探测 ───────────────────────────────────────────────────
@@ -371,9 +381,7 @@ export function saveRegistry(reg) {
   ensureDirs();
   reg.version = 2;
   if (!Array.isArray(reg.accounts)) reg.accounts = [];
-  const tmp = REGISTRY_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(reg, null, 2));
-  fs.renameSync(tmp, REGISTRY_FILE);
+  writePrivate(REGISTRY_FILE, JSON.stringify(reg, null, 2));
 }
 
 export function findAccount(reg, id) {
@@ -391,9 +399,7 @@ export function loadCreds(id) {
 
 export function saveCreds(id, creds) {
   ensureDirs();
-  const tmp = credsFile(id) + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify({ ...creds, updatedAt: nowMs() }, null, 2));
-  fs.renameSync(tmp, credsFile(id));
+  writePrivate(credsFile(id), JSON.stringify({ ...creds, updatedAt: nowMs() }, null, 2));
 }
 
 /** scanLogin 结果 → creds 缓存形状（统一形状，避免 signin/backup 两处各写一套） */
@@ -485,7 +491,7 @@ export function isPidAlive(pid) {
 
 export function writeSwitchLock(info) {
   ensureDirs();
-  fs.writeFileSync(SWITCH_LOCK_FILE, JSON.stringify({ ...info, pid: info.pid ?? null, startedAt: info.startedAt || nowMs() }, null, 2));
+  writePrivate(SWITCH_LOCK_FILE, JSON.stringify({ ...info, pid: info.pid ?? null, startedAt: info.startedAt || nowMs() }, null, 2));
 }
 
 export function clearSwitchLock() {
@@ -1566,8 +1572,9 @@ function round2(n) { return Math.round(Number(n) * 100) / 100; }
 /** 到期紧迫度分档：越近越红，供 CLI 与页面共用同一套色阶/字符 */
 export function expiryTone(ms, now = nowMs()) {
   if (!ms) return 'none';
+  if (ms <= now) return 'expired';
   const dl = Math.ceil((ms - now) / 86400000);
-  return dl < 0 ? 'expired' : dl <= 3 ? 'urgent' : dl <= 7 ? 'soon' : dl <= 21 ? 'mid' : 'far';
+  return dl <= 3 ? 'urgent' : dl <= 7 ? 'soon' : dl <= 21 ? 'mid' : 'far';
 }
 
 /**
@@ -1817,7 +1824,7 @@ export function loadCreditsCache() {
 
 export function saveCreditsCache(cache) {
   ensureDirs();
-  fs.writeFileSync(CREDITS_FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
+  writePrivate(CREDITS_FILE, JSON.stringify(cache, null, 2));
 }
 
 /**
@@ -1906,7 +1913,7 @@ export function appendSigninLog(entries) {
   }
   log.push(...entries);
   if (log.length > 200) log = log.slice(-200); // 滚动保留 200 条
-  fs.writeFileSync(SIGNIN_LOG_FILE, JSON.stringify(log, null, 2));
+  writePrivate(SIGNIN_LOG_FILE, JSON.stringify(log, null, 2));
 }
 
 export function readSigninLog(limit = 30) {

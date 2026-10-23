@@ -20,7 +20,9 @@ argument-hint: "[--stop|--restart|--browser]"
    告知：服务**不需要常驻**——登录数据固化在 `~/.qoder-account-manager/`，服务随 Qoder
    退出被关掉也没关系，下次打开 Qoder 重新执行本命令，所有槽位原样可用。
 
-3. 参数：`--stop` 停止服务，`--restart` 重启服务，`--browser` 额外用系统默认浏览器打开。
+3. 参数：`--stop` 让服务自己退出（卡死时才核对 pid 后兜底），`--restart` 重启服务，
+   `--browser` 额外用系统默认浏览器打开。页面加载后会把 token 移出地址栏，刷新仍可用；
+   服务重启换了 token 就要用新地址。
 
 ## 注意
 
@@ -35,6 +37,7 @@ argument-hint: "[--stop|--restart|--browser]"
   这是防止两个进程同时交换同一个数据目录，不是坏了。此时 `--stop` 也会被拒绝。
 - 服务不常驻：Qoder 连续 180s 不在运行就自动退出（省内存）。阈值在 `config.json` 的
   `exitAfterNoQoderSec`，设 0 变常驻；切换进行中不会退。页面顶部有倒计时横幅。
-- 需要停止服务时用 `--stop`，**不要** `taskkill /IM node.exe`：机器上叫 node.exe 的
-  进程未必都属于本插件，一刀切会连带杀掉别的（包括正在跑的切换）。用 `--stop` 或按
-  `server.json` 里的 pid 精确处理。
+- 需要停止服务时用 `--stop`：它先请求 `POST /api/shutdown` 让服务自退；服务没响应时才按
+  `server.json` 的 pid 兜底，且结束前会核对命令行确实是 `server.mjs`、启动时间与记录相符。
+  **不要** `taskkill /IM node.exe`：机器上叫 node.exe 的进程未必都属于本插件，一刀切会连带
+  杀掉别的（包括正在跑的切换）。

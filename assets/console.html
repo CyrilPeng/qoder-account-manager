@@ -261,7 +261,22 @@ code{font-family:var(--mono);font-size:12px;background:var(--panel2);padding:1px
 </div>
 
 <script>
-const TOKEN = new URLSearchParams(location.search).get('t') || '';
+// token 只在首次打开时出现在地址栏：读进 sessionStorage 后立刻从 URL 抹掉，免得留在
+// 浏览器历史/地址栏里。刷新时靠 sessionStorage 继续用；服务重启换了 token 就用新地址打开。
+const TOKEN = (() => {
+  let t = new URLSearchParams(location.search).get('t') || '';
+  if (t) {
+    try { sessionStorage.setItem('qam_token', t); } catch { /* 隐私模式等，忽略 */ }
+    try {
+      const u = new URL(location.href);
+      u.searchParams.delete('t');
+      history.replaceState(null, '', u.pathname + u.search + u.hash);
+    } catch { /* 忽略 */ }
+  } else {
+    try { t = sessionStorage.getItem('qam_token') || ''; } catch { /* 忽略 */ }
+  }
+  return t;
+})();
 const H = { 'Content-Type':'application/json', 'x-qam-token': TOKEN };
 let STATUS = null, BUSY = false, SWITCH_POLL = null;
 
