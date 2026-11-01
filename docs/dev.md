@@ -23,7 +23,10 @@ node --test "tests/*.test.mjs"
 ```
 
 - `tests/credits.test.mjs`：到期分档、分批合并、滚动账本 FIFO、“到期未知”兜底、
-  三种额度语义的归一、脱敏。
+  三种额度语义的归一、脱敏。`normalizeCredits` 的 `now` 必传——这批用例的账本到期日锚在
+  固定时刻上，用真实时钟跑几天后批次会集体过期，数字就对不上了。
+- `tests/signin.test.mjs`：零 CLAIMABLE 的三种分类（已领／状态异常／当日行还没发布）、
+  活动标签取值顺序、反学 id 的去重与非法 id、等待发布的预算边界与关闭开关。
 - `tests/snapshot.test.mjs`：禁交换清单 29 条、三档不重叠、任意档位组合不混入禁交换项、
   槽位 id 校验。
 - `tests/console.test.mjs`：内联脚本可解析、零外部依赖、token 不留在历史、悬停/聚焦提示、

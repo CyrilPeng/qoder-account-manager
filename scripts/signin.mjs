@@ -13,11 +13,20 @@
 //   · 非活跃账号：可刷新；刷新成功后新令牌除写入 creds 缓存外，还回写该槽位快照
 //     的 auth.v1.dat，否则日后切过去恢复出来的是已作废的 refreshToken（锁死账号）。
 // 红线: token 全程不输出到日志/终端。
+//
+// ══ 活动发布延迟（2026-11-01 实测）═══════════════════════════════════════
+// 每日活动行的窗口 startAt 正好是 10:00，但服务端把这一行挂进列表要晚于窗口起点：
+// 10:02 两次拉列表都没有它，当晚才领到。所以「列表非空却没有当日的 CLAIM_BENEFIT 行」
+// 是还没发布，不是活动死了 —— 定性成 campaign_not_live，并有界等待复查（默认 180s，
+// QAM_SIGNIN_WAIT_MS 可调，0 = 关掉）。领取窗口到次日 09:59，晚跑不丢额度。
+// 旧实现在这里盲发一个硬编码活动 id，而该 id 每天轮换，只会稳定换回一个 409，
+// 把「还没发布」渲染成「活动未开始或接口变更」，误导到要人去查接口是否变了。
 import {
   ensureDirs, loadRegistry, saveRegistry, findAccount, listSnapshots,
   snapSlotDir, scanLogin, saveCreds, refreshCreds, listCampaigns,
-  claimCampaign, filterClaimable, dailyCreditsClaimed, learnDailyCampaignIds,
-  KNOWN_DAILY_CAMPAIGNS, appendSigninLog, readSigninLog, maskUid, todayStr,
+  claimCampaign, filterClaimable, classifyNoClaim, campaignLabel,
+  learnDailyCampaignIds, waitForDailyCampaign, appendSigninLog, readSigninLog,
+  maskUid, todayStr,
   detectLayout, getDataDir, writeAuthV2, obtainAccountCreds,
 } from './qoder_lib.mjs';
 
@@ -74,6 +83,27 @@ async function ensureFresh(id, creds, isLive) {
   return { error: r.error, kind: r.kind };
 }
 
+/** 列表拉不到的定性。旧实现不写 fail_kind，调用端只能读文案猜原因。 */
+function listFailKind(r) {
+  if (r.kind === 'auth' || r.code === 'auth') return 'permanent_auth';
+  if (r.code === 'network' || (r.code === 'http' && r.status >= 500)) return 'transient';
+  return r.code || 'list_unavailable';
+}
+
+// 活动没发布是服务端的全局状态，不是某个账号的问题：一个进程最多等一轮，否则第二个账号
+// 会把控制台的 runCli 超时顶穿。QAM_SIGNIN_WAIT_MS=0 可以彻底关掉等待。
+let publishWaitSpent = false;
+async function awaitPublish(creds) {
+  if (publishWaitSpent) return { kind: 'not_published' };
+  publishWaitSpent = true;
+  const budgetMs = Number(process.env.QAM_SIGNIN_WAIT_MS) || 180_000;
+  if (!(budgetMs > 0)) return { kind: 'not_published' };
+  return waitForDailyCampaign(creds, {
+    budgetMs,
+    onNote: (wait) => console.log(`        列表里还没有今日活动行，等 ${Math.round(wait / 1000)}s 后复查…`),
+  });
+}
+
 async function signinAccount(id, live) {
   const reg = loadRegistry();
   const acct = findAccount(reg, id) || { id, name: '' };
@@ -112,6 +142,49 @@ async function signinAccount(id, live) {
     else if (fresh.writeback?.ok) ev.writeback = 'snapshot-updated';
   }
 
+  /** 逐个领取并汇总。claim 幂等，同一 id 重复调用无副作用。 */
+  const claimAll = async (items) => {
+    const details = [];
+    const acc = { ok: 0, already: 0, fail: 0, reward: 0, authDead: false, notActive: 0 };
+    for (const c of items) {
+      const cid = String(c?.campaignId || c?.campaign_id || '?');
+      const res = await claimCampaign(creds, c);
+      details.push({ id: cid, name: campaignLabel(c), result: res.kind, message: res.message, reward: res.reward ?? null });
+      if (res.kind === 'success') { acc.ok++; if (res.reward) acc.reward += res.reward; }
+      else if (res.kind === 'already') { acc.already++; if (res.reward) acc.reward += res.reward; }
+      else if (res.kind === 'auth') { acc.authDead = true; break; }
+      else { acc.fail++; if (res.code === 'campaign_not_active') acc.notActive++; }
+    }
+    return { ...acc, details };
+  };
+
+  const summarize = (res, { prefix = '领取成功' } = {}) => {
+    ev.campaigns = res.details;
+    if (res.authDead) {
+      ev.status = 'fail'; ev.fail_kind = 'permanent_auth';
+      ev.message = `登录态失效（401，刷新后仍失败）${res.ok + res.already ? `，本轮已领 ${res.ok + res.already} 项` : ''}，`
+        + '请重新登录该账号并 save 槽位';
+      return ev;
+    }
+    if (res.ok > 0 && res.fail === 0) {
+      ev.status = 'success';
+      ev.message = `${prefix} ${res.ok} 项${res.already ? `（另 ${res.already} 项此前已领）` : ''}`;
+      if (res.reward) ev.reward = res.reward;
+      return ev;
+    }
+    if (res.ok === 0 && res.fail === 0) {
+      ev.status = 'already'; ev.message = '每日奖励已领取';
+      if (res.reward) ev.reward = res.reward;
+      return ev;
+    }
+    ev.status = 'fail';
+    // 失败项全是「活动未激活」409 → 活动侧状态问题，不是凭证或本地逻辑坏了
+    ev.fail_kind = res.notActive === res.fail ? 'campaign_not_live' : 'claim_rejected';
+    ev.message = `部分失败（成功 ${res.ok}/已领 ${res.already}/失败 ${res.fail}）`;
+    if (res.reward) ev.reward = res.reward;
+    return ev;
+  };
+
   let r = await listCampaigns(creds);
   if (r.kind === 'auth' && !got.isLive) {
     // 401 自愈：强制刷新一次再重试（活跃账号不刷新，直接报失效）
@@ -125,68 +198,50 @@ async function signinAccount(id, live) {
   }
   if (r.kind !== 'ok') {
     ev.status = 'fail'; ev.message = r.message;
+    ev.fail_kind = listFailKind(r);
     return ev;
   }
 
-  const campaigns = r.campaigns;
-  const learned = learnDailyCampaignIds(campaigns);
-  const claimable = filterClaimable(campaigns);
-  const details = [];
+  let campaigns = r.campaigns;
+  let claimable = filterClaimable(campaigns);
+  if (claimable.length > 0) return summarize(await claimAll(claimable));
 
-  if (claimable.length > 0) {
-    let ok = 0, already = 0, fail = 0, reward = 0, authDead = false;
-    for (const c of claimable) {
-      const cid = String(c?.campaignId || c?.campaign_id || '?');
-      const cname = String(c?.name || c?.title || cid.slice(0, 8));
-      const res = await claimCampaign(creds, c);
-      details.push({ id: cid, name: cname, result: res.kind, message: res.message, reward: res.reward ?? null });
-      if (res.kind === 'success') { ok++; if (res.reward) reward += res.reward; }
-      else if (res.kind === 'already') { already++; if (res.reward) reward += res.reward; }
-      else if (res.kind === 'auth') { authDead = true; break; }
-      else fail++;
-    }
-    if (authDead) {
-      ev.status = 'fail'; ev.message = '登录态失效（401，刷新后仍失败），请重新登录该账号并 save 槽位';
-      ev.fail_kind = 'permanent_auth'; ev.campaigns = details;
+  // 零 CLAIMABLE：先问列表到底在说什么，再决定是等发布还是报状态异常
+  let cls = classifyNoClaim(campaigns);
+  if (cls === 'not_published') {
+    const w = await awaitPublish(creds);
+    if (w.kind === 'list_fail') {
+      ev.status = 'fail'; ev.message = w.r.message; ev.fail_kind = listFailKind(w.r);
       return ev;
     }
-    ev.campaigns = details;
-    if (ok > 0 && fail === 0) { ev.status = 'success'; ev.message = `领取成功 ${ok} 项${already ? `（另 ${already} 项此前已领）` : ''}`; if (reward) ev.reward = reward; }
-    else if (ok === 0 && fail === 0) { ev.status = 'already'; ev.message = '每日奖励已领取'; if (reward) ev.reward = reward; }
-    else { ev.status = 'fail'; ev.message = `部分失败（成功 ${ok}/已领 ${already}/失败 ${fail}）`; }
-    return ev;
+    if (w.campaigns) {
+      campaigns = w.campaigns;
+      claimable = filterClaimable(campaigns);
+      if (claimable.length > 0) {
+        return summarize(await claimAll(claimable), { prefix: '等活动发布后领取成功' });
+      }
+      cls = classifyNoClaim(campaigns);
+    }
+    if (cls === 'not_published') {
+      ev.status = 'fail'; ev.fail_kind = 'campaign_not_live';
+      ev.message = '今日每日活动行尚未挂进列表（窗口 10:00 起，服务端发布晚于窗口起点）；'
+        + '窗口到次日 09:59，稍后重跑即可';
+      return ev;
+    }
   }
-
-  // 零 CLAIMABLE：① 列表内当日已领 grant 定真话 → already
-  if (dailyCreditsClaimed(campaigns)) {
+  if (cls === 'claimed') {
     ev.status = 'already'; ev.message = '每日奖励已领取';
     return ev;
   }
-  // ② 盲发兜底：反学 id 优先 + 硬编码表兜底（claim 幂等，无副作用）
-  const candidates = [...learned];
-  for (const [kid, kname] of KNOWN_DAILY_CAMPAIGNS) {
-    if (!candidates.some((x) => x[0] === kid)) candidates.push([kid, kname]);
-  }
-  let ok = 0, already = 0, fail = 0, reward = 0, authDead = false;
-  for (const [cid, cname] of candidates) {
-    const res = await claimCampaign(creds, { campaignId: cid, name: cname });
-    details.push({ id: cid, name: cname, result: res.kind, message: res.message, reward: res.reward ?? null });
-    if (res.kind === 'success') { ok++; if (res.reward) reward += res.reward; }
-    else if (res.kind === 'already') { already++; if (res.reward) reward += res.reward; }
-    // 401 要单独定性：混进 fail 里会让人以为「活动没开始」，实际是凭证已死、需重新登录
-    else if (res.kind === 'auth') { authDead = true; break; }
-    else fail++;
-  }
-  ev.campaigns = details;
-  if (authDead && ok === 0 && already === 0) {
-    ev.status = 'fail'; ev.message = '登录态失效（401），请重新登录该账号并 save 槽位';
-    ev.fail_kind = 'permanent_auth';
+
+  // unclaimable_status：当日行在但状态不认识 → 盲发当日真实 id（幂等，无副作用）
+  const blind = learnDailyCampaignIds(campaigns).map(([campaignId, name]) => ({ campaignId, name }));
+  if (blind.length === 0) {
+    ev.status = 'fail'; ev.fail_kind = 'claim_rejected';
+    ev.message = '无可领取活动（当日活动行没有可用 id，盲发无从发起）';
     return ev;
   }
-  if (ok > 0) { ev.status = 'success'; ev.message = `盲发兜底领取成功 ${ok} 项`; if (reward) ev.reward = reward; }
-  else if (already > 0) { ev.status = 'already'; ev.message = '每日奖励已领取（盲发回放确认）'; }
-  else { ev.status = 'fail'; ev.message = '无可领取活动且盲发兜底失败（活动未开始或接口变更）'; }
-  return ev;
+  return summarize(await claimAll(blind), { prefix: '盲发兜底领取成功' });
 }
 
 async function main() {

@@ -69,10 +69,8 @@ export const COSY_CLIENT_TYPE = '10'; // 缺失时 sash 返回空 campaigns（�
 export const CLIENT_UA = 'Qoder';
 // 登录态键（v1 用；运行时拼接，避免写入时被凭证脱敏管道误改写）
 export const SECRET_KEY = ['secret:/', '/aicoding.', 'auth.userInfo'].join('');
-// 硬编码兜底活动 id（每日轮换会过期，优先从列表反学当日 id）
-export const KNOWN_DAILY_CAMPAIGNS = [
-  ['01a0f1cd-945c-7217-b373-f62e70da792d', '每日领 100 Credits'],
-];
+// 每日 Credits 活动 id 每天轮换（实测 11-01 两账号同为 01a1950a，前一天是 01a17b4c），
+// 硬编码具体 id 必然每天失效，兜底只能从列表反学当日行 —— 见 learnDailyCampaignIds。
 export const QODER_PROC_NAME = process.env.QAM_QODER_PROC_NAME || 'Qoder CN.exe';
 
 // ── 快照白名单 ────────────────────────────────────────────────────────────
@@ -1383,12 +1381,16 @@ export async function refreshCreds(creds) {
 export async function listCampaigns(creds) {
   const { status, body, raw } = await httpJson(
     `${OPEN_API_BASE}/sash/api/v1/me/campaigns`, { headers: apiHeaders(creds) });
-  if (status === 401) return { kind: 'auth', message: '登录态失效（401）' };
-  if (status === 0) return { kind: 'fail', message: `网络不可达: ${raw.slice(0, 120)}` };
-  if (status !== 200 && status !== 201) return { kind: 'fail', message: `campaigns 不可用（HTTP ${status}）` };
+  // code 是给调用方分类用的结构化结论。旧实现只给 message 文案，调用端靠 substring
+  // 猜原因——文案一改分类就瞎，所以这里把原因显式带出来。
+  if (status === 401) return { kind: 'auth', code: 'auth', status, message: '登录态失效（401）' };
+  if (status === 0) return { kind: 'fail', code: 'network', status, message: `网络不可达: ${raw.slice(0, 120)}` };
+  if (status !== 200 && status !== 201) {
+    return { kind: 'fail', code: 'http', status, message: `campaigns 不可用（HTTP ${status}）` };
+  }
   const campaigns = dig(body, ['campaigns']);
   if (!Array.isArray(campaigns) || campaigns.length === 0) {
-    return { kind: 'fail', message: 'empty_campaigns：活动列表为空（活动未开始或不可用）' };
+    return { kind: 'fail', code: 'empty_campaigns', status, message: 'empty_campaigns：活动列表为空（活动未开始或不可用）' };
   }
   return { kind: 'ok', campaigns };
 }
@@ -1420,8 +1422,16 @@ export async function claimCampaign(creds, campaign) {
     // 2xx 但无明确状态：宽容视为成功（claim 幂等，重试无副作用）
     return { kind: 'success', message: body ? '领取成功' : '领取成功（响应体读取失败）', reward };
   }
-  const msg = dig(body, ['message', 'msg']) || raw.slice(0, 160);
-  return { kind: 'fail', message: `claim 失败（HTTP ${status}）: ${msg}` };
+  const msg = dig(body, ['message', 'msg', 'errorMessage', 'error_message']) || raw.slice(0, 160);
+  const code = String(dig(body, ['errorCode', 'error_code']) || '');
+  // 实测 409 的响应体用的是 errorMessage/errorCode，而不是 message：旧实现取不到只能
+  // 把整串 JSON 打进日志，看起来像「接口变更」，其实是活动当天没挂出来。
+  return {
+    kind: 'fail', status,
+    code: code === 'CAMPAIGN_NOT_ACTIVE' ? 'campaign_not_active'
+      : status >= 500 ? 'server' : 'claim_rejected',
+    message: `claim 失败（HTTP ${status}${code ? ` ${code}` : ''}）: ${msg}`,
+  };
 }
 
 /** 盲发后复查：GET campaigns，指定 id 当日已 CLAIMED → true */
@@ -1449,9 +1459,30 @@ export function filterClaimable(campaigns) {
     String(dig(c, ['claimStatus', 'claim_status']) || '').toUpperCase() === 'CLAIMABLE');
 }
 
+/**
+ * 活动列表里没有 name 字段（实测每条行的 name/title 都是 undefined），直接用 id 前缀
+ * 展示的话终端上一串十六进制没法读。真正的文案在 placements[].content.zh.title，
+ * 与控制台「每日赠送」那行同源，取不到才回落到语义拼装、再回落到 id 前缀。
+ */
+export function campaignLabel(c) {
+  const explicit = String(c?.name || c?.title || c?.campaignName || c?.campaign_name || '').trim();
+  if (explicit) return explicit;
+  for (const p of (Array.isArray(c?.placements) ? c.placements : [])) {
+    const t = p?.content?.zh || p?.content?.en || {};
+    const title = String(t?.title || '').trim();
+    if (title) return title;
+  }
+  const id = String(dig(c, ['campaignId', 'campaign_id']) || '');
+  if (String(c?.actionType || '').toUpperCase() === 'CLAIM_BENEFIT'
+    && String(c?.benefit?.kind || '').toUpperCase() === 'CREDITS') {
+    const amount = Number(c?.benefit?.amount) || 0;
+    return amount ? `每日 ${amount} Credits` : '每日 Credits';
+  }
+  return id.slice(0, 8) || '未知活动';
+}
+
 /** 「每日 Credits」已领判定（从严：CLAIMED + CLAIM_BENEFIT + CREDITS + 当日窗口） */
-export function dailyCreditsClaimed(campaigns) {
-  const now = Math.floor(nowMs() / 1000);
+export function dailyCreditsClaimed(campaigns, now = Math.floor(nowMs() / 1000)) {
   return campaigns.some((c) =>
     String(dig(c, ['claimStatus', 'claim_status']) || '').toUpperCase() === 'CLAIMED'
     && String(c?.actionType || '').toUpperCase() === 'CLAIM_BENEFIT'
@@ -1460,8 +1491,7 @@ export function dailyCreditsClaimed(campaigns) {
 }
 
 /** 从列表反学当日每日 Credits 活动 id（硬编码必然过期，列表条目本身照常返回） */
-export function learnDailyCampaignIds(campaigns) {
-  const now = Math.floor(nowMs() / 1000);
+export function learnDailyCampaignIds(campaigns, now = Math.floor(nowMs() / 1000)) {
   const out = [];
   for (const c of campaigns) {
     if (String(c?.actionType || '').toUpperCase() !== 'CLAIM_BENEFIT') continue;
@@ -1469,10 +1499,51 @@ export function learnDailyCampaignIds(campaigns) {
     if (!inWindow(c, now)) continue;
     const id = String(dig(c, ['campaignId', 'campaign_id']) || '');
     if (!idSafe(id)) continue;
-    const name = String(c?.name || c?.title || c?.campaignName || c?.campaign_name || id.slice(0, 8));
-    if (!out.some((x) => x[0] === id)) out.push([id, name]);
+    if (!out.some((x) => x[0] === id)) out.push([id, campaignLabel(c)]);
   }
   return out;
+}
+
+/** 今日「每日 Credits」活动行是否已挂进列表（只看发布，不看状态） */
+export function dailyCampaignPublished(campaigns, now = Math.floor(nowMs() / 1000)) {
+  return learnDailyCampaignIds(campaigns, now).length > 0;
+}
+
+/**
+ * 零 CLAIMABLE 时列表到底在说什么：
+ *   claimed            —— 当日行存在且已 CLAIMED，真话就是「今日已领」
+ *   unclaimable_status —— 当日行存在但状态既不是 CLAIMABLE 也不是 CLAIMED（接口异常/边缘态）
+ *   not_published      —— 列表里压根没有当日行
+ * not_published 必须单独定性：实测（2026-11-01）每日行的窗口 startAt 正好是 10:00，
+ * 但服务端把这一行挂进列表晚于窗口起点（10:02 两次拉列表都还没有，当晚已在）。把这种
+ * 「还没发布」说成「活动未开始或接口变更」，人就真的以为活动死了。
+ */
+export function classifyNoClaim(campaigns, now = Math.floor(nowMs() / 1000)) {
+  if (dailyCreditsClaimed(campaigns, now)) return 'claimed';
+  if (dailyCampaignPublished(campaigns, now)) return 'unclaimable_status';
+  return 'not_published';
+}
+
+/**
+ * 等今日活动行发布：有界轮询，只读列表不碰令牌。它只回答「行出来了没有」，
+ * 已领/可领/状态异常一律交回调用方用 classifyNoClaim 判，避免两处各定一遍义。
+ * 默认 180s 上限是为控制台的 runCli 超时（300s）留余量——两个账号串行跑也不能顶穿。
+ * 依赖注入 list/nap/now 是为了让「发布延迟」这条真实路径能离线单测。
+ */
+export async function waitForDailyCampaign(creds, {
+  budgetMs = 180_000, list = listCampaigns, nap = sleep, now = Date.now, onNote = () => {},
+} = {}) {
+  const deadline = now() + budgetMs;
+  for (const step of [60_000, 120_000]) {
+    const wait = Math.min(step, deadline - now());
+    if (wait <= 0) break;
+    onNote(wait);
+    await nap(wait);
+    const r = await list(creds);
+    if (r.kind !== 'ok') return { kind: 'list_fail', r };
+    if (dailyCampaignPublished(r.campaigns)) return { kind: 'published', campaigns: r.campaigns };
+  }
+  return { kind: 'not_published' };
 }
 
 // ── Credits / 配额 ────────────────────────────────────────────────────────
@@ -1696,7 +1767,7 @@ export function expiryBatches(segments, { now = nowMs(), ledger = [] } = {}) {
  * 加购/赠送是"每日刷新 + 领取后 N 天"的滚动到期（按账本逐笔拆），专属包用自带到期时刻。
  * 汇总段给出合计与"最近到期"，UI 直接照着画分批条。
  */
-export function normalizeCredits({ usage, plan, rule = null, ledger = [] } = {}) {
+export function normalizeCredits({ usage, plan, rule = null, ledger = [], now = nowMs() } = {}) {
   const top = usage && typeof usage === 'object' ? (usage.qoderUsage || usage.data?.qoderUsage || null) : null;
   const ent = usage?.enterpriseUsage || usage?.data?.enterpriseUsage || null;
   const planTier = pickStr(plan, ['plan_tier_name', 'planTierName', 'plan_name', 'planName']);
@@ -1712,7 +1783,6 @@ export function normalizeCredits({ usage, plan, rule = null, ledger = [] } = {})
 
   const periodEndMs = pickNum(top, ['expiresAt', 'expires_at']) ?? pickNum(plan, ['end_date', 'endDate']) ?? null;
   const periodStartMs = pickNum(plan, ['start_date', 'startDate']) ?? null;
-  const now = nowMs();
   const segs = [];
   const push = (s) => { if (s) segs.push(s); };
 

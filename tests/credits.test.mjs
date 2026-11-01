@@ -157,7 +157,9 @@ test('normalizeCredits 三类到期语义各算各的', () => {
   const rule = { validityDays: 30, amount: 100, claimStatus: 'CLAIMED', title: '每日赠送' };
   const ledger = [{ date: '2026-10-01', amount: 100, claimedAtMs: NOW - 22 * DAY, expiresAtMs: NOW + 8 * DAY }];
 
-  const out = lib.normalizeCredits({ usage, plan, rule, ledger });
+  // now 必传：这批账本的到期日锚在 NOW 上，用真实时钟跑几天后批次就会集体过期，
+  // byExpiry 从 900 掉到 200 —— 这支测试本来就是个定时炸弹。
+  const out = lib.normalizeCredits({ usage, plan, rule, ledger, now: NOW });
   assert.equal(out.ok, true);
   assert.equal(out.kind, 'qoder');
   assert.equal(out.planTier, 'Pro');

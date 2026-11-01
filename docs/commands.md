@@ -108,6 +108,10 @@ node --no-warnings scripts/signin.mjs history [n] [--json]      # 最近 n 条�
 活跃账号**只用不刷**（见 [design.md](design.md) 的轮换安全策略），非活跃账号过期时自动用
 refreshToken 续期并双写回缓存与快照。
 
+每日活动行的窗口是 10:00 → 次日 09:59，但服务端把这一行发布进列表要晚于 10:00。撞上这段
+时脚本会只读地复查列表（最多 180s，`QAM_SIGNIN_WAIT_MS` 可调，0 = 关掉），仍没有就报
+`campaign_not_live`——它是「今天还没开始」，不是活动死了，窗口内任何时候重跑都算。
+
 ## `console.mjs` — 控制台启动器
 
 ```bash
@@ -131,6 +135,7 @@ node --no-warnings scripts/console.mjs --stop     # 让服务自己退出；卡�
 | `QAM_PORT` | 控制台服务起始端口（占用时自动 +1，最多试 10 次） | `38117` |
 | `QAM_TOKEN` | 指定访问 token（不设则启动时随机生成一次性 token） | 随机 |
 | `QAM_QODER_PROC_NAME` | 进程名（自测/多实例用，一般别动） | `Qoder CN.exe` |
+| `QAM_SIGNIN_WAIT_MS` | 签到时等活动发布的最长预算，`0` = 不等 | `180000` |
 
 > `QODER_AM_HOME` 必须对**每一次调用**生效（CLI 与控制台服务是两个进程）。只在某个终端里
 > 设一次，就会出现“两个数据目录并存、槽位看起来空了”的错觉。

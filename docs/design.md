@@ -81,7 +81,16 @@ refreshTokenExpiresAt, user:{id,name,email,phone,avatarUrl}}`。实测 `app_boun
 - `POST .../campaigns/{id}/claim` 幂等领取（Content-Length: 0）；
 - 必带 `Cosy-ClientType: 10`（缺失时返回空列表）。
 
-零 CLAIMABLE 时先查当日 CLAIMED grant 定真话，再盲发反学/硬编码活动 id 兜底。
+行形状（2026-11-01 实测，两账号一致）：顶层没有 `name`/`title`，中文文案在
+`placements[].content.zh.title`；`claimStatus` 取 `CLAIMABLE`/`CLAIMED`；每日行的窗口是
+`startAt` 10:00 → `endAt` 次日 09:59；**活动 id 每天轮换**（11-01 两账号同为 `01a1950a…`，
+前一天是 `01a17b4c…`），所以硬编码具体 id 的兜底必然每天失效，只能从列表反学当日行。
+
+零 CLAIMABLE 时先分类再动作（`classifyNoClaim`）：当日行 `CLAIMED` → 真话是「今日已领」；
+当日行在但状态不认识 → 盲发反学到的当日 id；**列表里没有当日行 → 是服务端还没把这一行
+发布出来**（窗口 10:00 开，实测 10:02 仍缺席、当晚已在），定性 `campaign_not_live` 并有界
+等待复查，而不是报成「活动未开始或接口变更」。对不存在的 id 盲发只会稳定换回
+409 `CAMPAIGN_NOT_ACTIVE`，那串错误会把人往「接口变更」的方向带偏。
 
 ## Credits 与到期
 
